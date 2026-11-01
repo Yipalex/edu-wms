@@ -1,0 +1,175 @@
+# =============================================================
+# 教培机构 · 仓储管理系统（WMS）—— Docker Compose 编排
+# 设计契约见 docs/DESIGN.md 第 9 节（部署）
+#
+# 隔离原则（与 VPS 上现有业务系统零冲突）：
+#   - 独立项目名 edu-wms（compose -p / name 字段），容器与网络均带前缀
+#   - 独立网络 edu_wms_net，不加入任何现有网络
+#   - 独立命名卷 edu_wms_pgdata / edu_wms_uploads / edu_wms_backups，不挂载现有目录
+#   - 独立 PostgreSQL 16 容器，不复用现有数据库实例
+#   - 只有 web（前端 nginx）映射到宿主机 127.0.0.1，公网流量必须经宿主机 nginx 反代
+#   - db / api 完全不暴露宿主机端口
+#   - 全部服务设资源上限（mem_limit / cpus），避免抢占现有业务
+#
+# 入口拓扑（方案 a）：
+#   公网 → 宿主机 nginx(443) → 127.0.0.1:${WMS_WEB_PORT} → web 容器(nginx:alpine)
+#        → 静态文件 dist/  或  /api、/uploads 反代 → api 容器(uvicorn:8080) → db 容器
+#   注：web 镜像基座为 nginx:1.27-bookworm（glibc）。目标 VPS 是 CentOS 7（kernel 3.10），
+#       musl 版（alpine）二进制会命中 docker 默认 seccomp 白名单外的 syscall 直接 EPERM，
+#       实测 nginx:alpine 写 /run/nginx.pid、postgres:16-alpine 写 postmaster.pid 都会崩。
+#   理由：前后端同域，无 CORS；Cookie/JWT 简单；api 不出宿主机端口更安全。
+# =============================================================
+
+name: edu-wms
+
+services:
+  # ---------- PostgreSQL 16（独立实例、独立卷、不映射宿主机端口） ----------
+  db:
+    image: postgres:16-bookworm
+    container_name: edu-wms-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-edu_wms}
+      POSTGRES_USER: ${POSTGRES_USER:-edu_wms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置，请复制 .env.example 为 .env 并填写}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - edu_wms_pgdata:/var/lib/postgresql/data
+    networks:
+      - edu_wms_net
+    # 注意：故意不写 ports —— 数据库只在内部网络可见，宿主机与公网均无法直连
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-edu_wms} -d ${POSTGRES_DB:-edu_wms}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    mem_limit: 512m
+    cpus: 1.0
+    # 低内存 VPS（<2GB）时可下调 shared_buffers，通过 POSTGRES_EXTRA_ARGS 覆盖
+    command: >
+      postgres
+      -c shared_buffers=${PG_SHARED_BUFFERS:-128MB}
+      -c max_connections=${PG_MAX_CONNECTIONS:-50}
+      -c log_min_duration_statement=1000
+
+  # ---------- FastAPI 后端（仅内部网络，不映射宿主机端口） ----------
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: edu-wms-api:${IMAGE_TAG:-latest}
+    container_name: edu-wms-api
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 2
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-edu_wms}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-edu_wms}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 未设置，请用 openssl rand -hex 32 生成并写入 .env}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+      # 单文件上传上限（字节）。后端默认 10MB；nginx 层（web 容器与宿主机/1Panel）
+      # 已放宽到 20m，因此【实际生效上限就是这个值】——手机拍照直传超限报 413 时调大它
+      UPLOAD_MAX_SIZE: ${UPLOAD_MAX_SIZE:-10485760}
+      LABEL_FONT_REGULAR: ${LABEL_FONT_REGULAR:-/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc}
+      LABEL_FONT_BOLD: ${LABEL_FONT_BOLD:-/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      ADMIN_INIT_USERNAME: ${ADMIN_INIT_USERNAME:-admin}
+      ADMIN_INIT_PASSWORD: ${ADMIN_INIT_PASSWORD:-}
+      AUTO_SEED: ${AUTO_SEED:-false}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - edu_wms_uploads:/data/uploads
+    networks:
+      - edu_wms_net
+    # 注意：故意不写 ports —— 公网经 web 容器的 /api 反代到达本服务
+    healthcheck:
+      # 脚本在镜像内（backend/Dockerfile 生成），兼容 /healthz 与 /api/healthz 两种实现
+      test: ["CMD", "python", "/opt/healthcheck.py"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 768m
+    cpus: 1.0
+
+  # ---------- 前端（Vite 构建产物 + nginx 静态托管 + /api 反代；唯一入口） ----------
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: edu-wms-web:${IMAGE_TAG:-latest}
+    container_name: edu-wms-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      # 绑定地址可配置（WMS_WEB_BIND），公网流量必须经反代进来（TLS 在反代层终结）：
+      #   - 默认 127.0.0.1：宿主机 nginx 反代场景（裸 nginx / 1Panel 方案 A 也兼容）
+      #   - 1Panel 方案 B：填宿主机 docker0 网桥 IP（如 172.17.0.1），让 OpenResty
+      #     容器能经网桥访问；该 IP 不对外网暴露，仍需 1Panel 防火墙+安全组不放开此端口
+      - "${WMS_WEB_BIND:-127.0.0.1}:${WMS_WEB_PORT:-8081}:80"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    networks:
+      - edu_wms_net
+    healthcheck:
+      # 注意：必须用 curl。官方 nginx:*-bookworm（glibc，见下注）镜像里没有 wget/busybox，
+      # healthcheck 会恒定报 `/bin/sh: 1: wget: not found` → 容器一直 unhealthy，
+      # 但实际服务是好的，极易误判。（nginx:alpine 有 busybox wget，但本 VPS 不能用 alpine）
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 128m
+    cpus: 0.5
+
+  # ---------- 定时备份（pg_dump + uploads 打包，保留 N 天） ----------
+  # 方案：复用 postgres:16-bookworm 镜像 + 自带 loop 脚本（不引入 ofelia/cron 依赖，简单可靠）。
+  # 注：CentOS 7（kernel 3.10）上 alpine 版 PG 报 EPERM 写 postmaster.pid，必须用 bookworm 版。
+  # 脚本每 BACKUP_INTERVAL_SECONDS 秒执行一次 dump，首次启动延迟 120s 等系统稳定。
+  backup:
+    image: postgres:16-bookworm
+    container_name: edu-wms-backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/backup/backup-loop.sh"]
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-edu_wms}
+      PGUSER: ${POSTGRES_USER:-edu_wms}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - edu_wms_backups:/backups
+      - edu_wms_uploads:/uploads:ro
+      - ./deploy/scripts/backup-loop.sh:/backup/backup-loop.sh:ro
+    networks:
+      - edu_wms_net
+    mem_limit: 128m
+    cpus: 0.5
+
+networks:
+  edu_wms_net:
+    # 显式命名（否则 compose 会加项目前缀成 edu-wms_edu_wms_net，
+    # 与 DESIGN §9 契约及 connect-openresty.sh 引用的名字不一致）
+    name: edu_wms_net
+    driver: bridge
+    # internal: false —— web 容器需要绑定宿主机地址给反代；
+    # db/api/backup 均无 ports 映射，事实上只有 web 一个入口。
+    internal: false
+
+volumes:
+  edu_wms_pgdata:
+    name: edu_wms_pgdata
+  edu_wms_uploads:
+    name: edu_wms_uploads
+  edu_wms_backups:
+    name: edu_wms_backups
