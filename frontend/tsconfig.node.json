@@ -1,0 +1,14 @@
+{
+  "//": "此文件已废弃（保留仅为兼容），类型检查统一走根目录 tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "noEmit": true,
+    "strict": true
+  },
+  "include": []
+}
