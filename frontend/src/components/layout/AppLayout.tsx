@@ -145,6 +145,7 @@ export default function AppLayout() {
       {/* ============ 全局顶栏 ============ */}
       <header className="zx-topbar">
         <a className="zx-topbar__brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
+          <img src="/img/zexi-logo.png" alt="" className="zx-topbar__logo" />
           泽曦书画
         </a>
         <div className={`zx-sys-switch${sysOpen ? ' zx-sys-switch--open' : ''}`} ref={sysRef}>

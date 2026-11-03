@@ -45,7 +45,8 @@ export default function Login() {
 
         {/* 中：品牌标题（桌面在卡片上方；手机在猫上方） */}
         <div className="login-brand">
-          <h1>教培机构</h1>
+          <img src="/img/zexi-logo.png" alt="泽曦书画" className="login-brand__logo" />
+          <h1>泽曦书画</h1>
           <p className="login-subtitle">仓储管理系统</p>
         </div>
 

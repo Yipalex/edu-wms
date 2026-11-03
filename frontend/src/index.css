@@ -1,5 +1,5 @@
 /* ============================================================
- * 教培仓储 · 墨·纸·印 设计语言（React 复刻版）
+ * 泽曦仓储 · 墨·纸·印 设计语言（React 复刻版）
  * token 与骨架视觉对齐 packages/design-system（tokens/shell/components）
  * ============================================================ */
 
@@ -762,6 +762,25 @@ body {
   text-align: center;
   color: var(--zx-ink);
   margin-bottom: 24px;
+}
+
+/* 品牌印章（透明底 logo 图片） */
+.login-brand__logo {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 14px;
+  filter: drop-shadow(0 3px 10px rgba(163, 67, 50, 0.26));
+}
+
+/* 顶栏品牌位 logo */
+.zx-topbar__logo {
+  height: 26px;
+  width: 26px;
+  object-fit: contain;
+  display: block;
+  flex: none;
 }
 
 .login-brand h1 {
