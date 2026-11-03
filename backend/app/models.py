@@ -55,7 +55,7 @@ def _pk() -> Mapped[int]:
 
 
 # ---------- 枚举（PG 原生 TYPE / SQLite VARCHAR+CHECK） ----------
-UserRoleEnum = Enum("admin", "operator", name="user_role", create_constraint=True)
+UserRoleEnum = Enum("admin", "superadmin", "operator", name="user_role", create_constraint=True)
 ItemStatusEnum = Enum("active", "merged", "retired", name="item_status", create_constraint=True)
 PrintModeEnum = Enum("label", "scan_card", name="print_mode", create_constraint=True)
 DocTypeEnum = Enum(
@@ -523,6 +523,55 @@ class ItemMergeLog(Base):
 
     keeper: Mapped[Item] = relationship("Item", foreign_keys=[keeper_id], lazy="joined")
     merged: Mapped[Item] = relationship("Item", foreign_keys=[merged_id], lazy="joined")
+    operator: Mapped["User | None"] = relationship("User", lazy="joined")
+
+
+class DeletedItem(Base):
+    """已彻底删除的物品档案（归档，2026-11-04 引入）。
+
+    背景：仓库早期录入了不少库存数值胡乱填写的物品，普通「删除」（软删=retired）
+    因有库存/流水而被拦。超级管理员需要能「彻底删除」——物品档案从名录消失、
+    条码释放可再分配，但历史业务凭证（入库/出库/盘点单据）必须完整保留。
+
+    做法：物品行真正从 items 表移除；所有引用它的行按下列策略处理——
+      · inventory（库存行）        → 行保留，qty_on_hand/qty_reserved 归零
+      · stock_movements（流水）     → 行保留（审计真源，不可删）
+      · inbound/outbound/return/stocktake 明细行 → 行保留，item_id 改指向
+        「已删除物品」占位档案（快照字段 name_snapshot/barcode_snapshot 已存原值，
+        历史单据展示不受影响）
+      · item_photos / item_aliases  → 行保留，关联占位档案
+      · barcode_history             → 行保留，关联占位档案
+      · item_merge_log              → 行保留，关联占位档案
+    本表存被删物品的原始快照 + 处理摘要，供「查看已删除档案」与「恢复」使用。
+    """
+
+    __tablename__ = "deleted_items"
+    __table_args__ = (
+        Index("idx_deleted_items_barcode", "barcode"),
+        Index("idx_deleted_items_time", "deleted_at"),
+    )
+
+    id: Mapped[int] = _pk()
+    origin_item_id: Mapped[int] = mapped_column(BigIntPK, nullable=False)  # 原 items.id
+    barcode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category_id: Mapped[int | None] = mapped_column(BigIntPK, nullable=True)
+    category_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    spec: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    suggest_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    remark: Mapped[str | None] = mapped_column(Text, default="", server_default=text("''"))
+    # 处理摘要（JSON）：{"stock_rows":12,"movements":34,"doc_lines":8,"photos":3,...}
+    # server_default 用 '{}'（不带 ::jsonb）：PG 会隐式转成 jsonb，SQLite 也能解析
+    impact: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict, server_default=text("'{}'"))
+    reason: Mapped[str | None] = mapped_column(String(300), default="", server_default=text("''"))
+    operator_id: Mapped[int | None] = mapped_column(BigIntPK, ForeignKey("users.id"), nullable=True)
+    operator_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    deleted_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"), default=utcnow)
+    # 恢复痕迹：恢复后标记时间与操作人（保留记录不物理删，便于追溯）
+    restored_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    restored_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     operator: Mapped["User | None"] = relationship("User", lazy="joined")
 
 

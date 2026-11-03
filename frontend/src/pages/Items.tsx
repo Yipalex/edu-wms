@@ -19,7 +19,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, PlusOutlined, PrinterOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, PrinterOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import * as itemsApi from '@/api/items';
@@ -27,6 +27,7 @@ import * as categoriesApi from '@/api/categories';
 import type { Item } from '@/api/types';
 import PageContainer from '@/components/PageContainer';
 import BarcodePreview from '@/components/BarcodePreview';
+import PurgeItemModal from '@/components/PurgeItemModal';
 import { useAuthStore } from '@/stores/authStore';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePagination } from '@/hooks/usePagination';
@@ -40,7 +41,8 @@ export default function Items() {
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const { page, pageSize, setPage, setPageSize, makeTablePagination, reset } = usePagination(20);
-  const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin' || s.user?.role === 'superadmin');
+  const isSuperAdmin = useAuthStore((s) => s.user?.role === 'superadmin');
   const [filters, setFilters] = useState<{
     q?: string;
     category_id?: number;
@@ -52,6 +54,8 @@ export default function Items() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  /** 待彻底删除的物品（超级管理员） */
+  const [purgeTarget, setPurgeTarget] = useState<Item | null>(null);
 
   /** 软删（仅管理员）：状态置为已停用，有库存/流水时后端返回 409 并提示 */
   const onDelete = async (r: Item) => {
@@ -192,11 +196,22 @@ export default function Items() {
                 </Button>
               </Popconfirm>
             )}
+            {isSuperAdmin && r.status !== 'merged' && (
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<ThunderboltOutlined />}
+                onClick={() => setPurgeTarget(r)}
+              >
+                彻底删除
+              </Button>
+            )}
           </Space>
         ),
       },
     ],
-    [navigate, isAdmin, deletingId],
+    [navigate, isAdmin, isSuperAdmin, deletingId],
   );
 
   const updateFilter = (patch: Partial<typeof filters>) => {
@@ -415,6 +430,12 @@ export default function Items() {
           </div>
         )}
       </Modal>
+      {/* 彻底删除确认（仅超级管理员） */}
+      <PurgeItemModal
+        item={purgeTarget}
+        onClose={() => setPurgeTarget(null)}
+        onDone={() => setSelectedIds((prev) => prev.filter((id) => id !== purgeTarget?.id))}
+      />
     </PageContainer>
   );
 }

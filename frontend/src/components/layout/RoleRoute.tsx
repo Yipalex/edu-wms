@@ -4,11 +4,27 @@ import { useAuthStore } from '@/stores/authStore';
 import type { ReactNode } from 'react';
 import type { UserRole } from '@/api/types';
 
-/** 角色路由：不满足角色直接访问时显示「无权限」页 */
-export default function RoleRoute({ role, children }: { role: UserRole; children: ReactNode }) {
+/**
+ * 角色路由：不满足角色直接访问时显示「无权限」页。
+ *
+ * role 可传单个或多个角色，任一命中即放行。
+ * 注意：superadmin 视为所有角色的超集（超级管理员拥有管理员的全部能力）。
+ */
+export default function RoleRoute({
+  role,
+  children,
+}: {
+  role: UserRole | UserRole[];
+  children: ReactNode;
+}) {
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
-  if (user?.role !== role) {
+  const allowed = Array.isArray(role) ? role : [role];
+  const ok =
+    !!user &&
+    (allowed.includes(user.role) ||
+      (user.role === 'superadmin' && allowed.includes('admin')));
+  if (!ok) {
     return (
       <Result
         status="403"

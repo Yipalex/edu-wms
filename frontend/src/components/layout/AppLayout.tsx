@@ -20,6 +20,7 @@ import {
   DatabaseOutlined,
   SwapOutlined,
   BarChartOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
@@ -29,22 +30,23 @@ const { useBreakpoint } = Grid;
 
 /** 系统切换器（全系统统一配置） */
 const ZX_SYSTEMS = [
-  { id: 'yj', name: '业绩登记系统', domain: 'yj.example.com', color: 'var(--zx-sys-yj)', url: 'https://yj.example.com/' },
-  { id: 'quan', name: '券类管理系统', domain: 'quan.example.com', color: 'var(--zx-sys-quan)', url: 'https://quan.example.com/' },
-  { id: 'jz', name: '教资报名系统', domain: 'jz.example.com', color: 'var(--zx-sys-jz)', url: 'https://jz.example.com/' },
-  { id: 'sf', name: '评测报告系统', domain: 'sf.example.com', color: 'var(--zx-sys-sf)', url: 'https://sf.example.com/' },
-  { id: 'wms', name: '仓库管理系统', domain: 'wms.example.com', color: 'var(--zx-sys-wms)', url: 'https://wms.example.com/' },
-  { id: 'zc', name: '固定资产管理', domain: 'zc.example.com', color: 'var(--zx-sys-zc)', url: 'https://zc.example.com/' },
+  { id: 'yj', name: '业绩登记系统', domain: 'yj.zexishuhua.com', color: 'var(--zx-sys-yj)', url: 'https://yj.zexishuhua.com/' },
+  { id: 'quan', name: '券类管理系统', domain: 'quan.zexishuhua.com', color: 'var(--zx-sys-quan)', url: 'https://quan.zexishuhua.com/' },
+  { id: 'jz', name: '教资报名系统', domain: 'jz.zexishuhua.com', color: 'var(--zx-sys-jz)', url: 'https://jz.zexishuhua.com/' },
+  { id: 'sf', name: '评测报告系统', domain: 'sf.zexishuhua.com', color: 'var(--zx-sys-sf)', url: 'https://sf.zexishuhua.com/' },
+  { id: 'wms', name: '仓库管理系统', domain: 'wms.zexishuhua.com', color: 'var(--zx-sys-wms)', url: 'https://wms.zexishuhua.com/' },
+  { id: 'zc', name: '固定资产管理', domain: 'zc.zexishuhua.com', color: 'var(--zx-sys-zc)', url: 'https://zc.zexishuhua.com/' },
 ];
 const CURRENT_SYSTEM = ZX_SYSTEMS.find((s) => s.id === 'wms')!;
 
 /** 全部菜单（按角色过滤在下方处理） */
-const ALL_MENUS: { key: string; label: string; group?: string; adminOnly?: boolean }[] = [
+const ALL_MENUS: { key: string; label: string; group?: string; adminOnly?: boolean; superOnly?: boolean }[] = [
   { key: '/', label: '仪表盘', group: '工作台' },
   { key: '/scan', label: '扫码工作台', group: '工作台' },
   { key: '/items', label: '物品档案', group: '物品与条码' },
   { key: '/items/pending-code', label: '待编码物品', group: '物品与条码' },
   { key: '/items/duplicates', label: '去重合并', group: '物品与条码', adminOnly: true },
+  { key: '/items/deleted', label: '已删除档案', group: '物品与条码', superOnly: true },
   { key: '/labels', label: '标签打印', group: '物品与条码' },
   { key: '/inbound', label: '入库单', group: '出入库' },
   { key: '/outbound', label: '出库/调拨', group: '出入库' },
@@ -64,6 +66,7 @@ const PATH_ICONS: Record<string, ReactNode> = {
   '/items': <AppstoreOutlined />,
   '/items/pending-code': <TagsOutlined />,
   '/items/duplicates': <MergeCellsOutlined />,
+  '/items/deleted': <DeleteOutlined />,
   '/labels': <PrinterOutlined />,
   '/inbound': <InboxOutlined />,
   '/outbound': <SwapOutlined />,
@@ -89,7 +92,7 @@ const MOBILE_TABS: { key: string; label: string; icon: ReactNode }[] = [
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout, isAdmin, roleLabel } = useAuth();
+  const { user, logout, isAdmin, isSuperAdmin, roleLabel } = useAuth();
   const screens = useBreakpoint();
   const isMobile = !screens.md; // <768px
   const [sysOpen, setSysOpen] = useState(false);
@@ -108,8 +111,12 @@ export default function AppLayout() {
   }, [sysOpen]);
 
   const visibleMenus = useMemo(
-    () => ALL_MENUS.filter((m) => !m.adminOnly || isAdmin),
-    [isAdmin],
+    () => ALL_MENUS.filter((m) => {
+      if (m.superOnly) return isSuperAdmin;
+      if (m.adminOnly) return isAdmin;
+      return true;
+    }),
+    [isAdmin, isSuperAdmin],
   );
 
   const navGroups = useMemo(() => {
@@ -138,7 +145,7 @@ export default function AppLayout() {
       {/* ============ 全局顶栏 ============ */}
       <header className="zx-topbar">
         <a className="zx-topbar__brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
-          教培机构
+          泽曦书画
         </a>
         <div className={`zx-sys-switch${sysOpen ? ' zx-sys-switch--open' : ''}`} ref={sysRef}>
           <button

@@ -26,20 +26,22 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.db import get_db
-from app.deps import get_current_user, require_role
+from app.deps import get_current_user, require_role, require_super_admin
 from app.models import (
-    BarcodeHistory, Category, Inventory, Item, ItemAlias, ItemMergeLog, ItemPhoto,
+    BarcodeHistory, Category, DeletedItem, Inventory, Item, ItemAlias, ItemMergeLog, ItemPhoto,
     StockMovement, User,
 )
 from app.schemas.common import BizError, ok, ok_page
 from app.services import barcode as bc
 from app.services import merge as merge_svc
+from app.services import purge as purge_svc
 from app.services.audit import write_audit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/items", tags=["物品档案"])
 
 AdminUser = require_role("admin")
+SuperAdminUser = require_super_admin()
 
 ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 ALLOWED_IMAGE_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -338,6 +340,58 @@ def create_item(body: ItemCreate, request: Request, user: User = Depends(get_cur
     return ok(item_row(item))
 
 
+# ---------- 已彻底删除的档案（仅超级管理员） ----------
+
+@router.get("/deleted/list")
+def list_deleted_items(
+    page: int = 1, page_size: int = 20, q: str | None = None,
+    _: User = Depends(SuperAdminUser), db: Session = Depends(get_db),
+):
+    """已彻底删除的物品档案列表（仅超级管理员），支持恢复。"""
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
+    conds = []
+    if q:
+        like = f"%{q.strip()}%"
+        conds.append(or_(DeletedItem.name.like(like), DeletedItem.barcode.like(like)))
+    stmt = select(DeletedItem)
+    if conds:
+        stmt = stmt.where(*conds)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = db.scalars(stmt.order_by(DeletedItem.deleted_at.desc())
+                      .offset((page - 1) * page_size).limit(page_size)).all()
+    return ok_page([{
+        "id": r.id, "origin_item_id": r.origin_item_id, "barcode": r.barcode, "name": r.name,
+        "category_name": r.category_name, "spec": r.spec or "", "unit": r.unit or "",
+        "suggest_price": float(r.suggest_price) if r.suggest_price is not None else None,
+        "impact": r.impact or {}, "reason": r.reason or "",
+        "operator_name": r.operator_name, "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None,
+        "restored_at": r.restored_at.isoformat() if r.restored_at else None,
+        "restored_by": r.restored_by,
+    } for r in rows], page=page, page_size=page_size, total=total)
+
+
+class RestoreBody(BaseModel):
+    pass
+
+
+@router.post("/deleted/{archive_id}/restore")
+def restore_deleted_item(
+    archive_id: int, body: RestoreBody, request: Request,
+    superadmin: User = Depends(SuperAdminUser), db: Session = Depends(get_db),
+):
+    """恢复已彻底删除的物品档案（仅超级管理员）。条码若已被占用则恢复为待编码。"""
+    try:
+        res = purge_svc.restore_item(db, archive_id=archive_id, operator=superadmin)
+        write_audit(db, action="restore", entity="item", entity_id=archive_id, user=superadmin,
+                    detail=res["restored"], request=request)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return ok(res)
+
+
 @router.get("/{item_id}")
 def get_item(item_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     item = db.get(Item, item_id)
@@ -468,6 +522,43 @@ def delete_item(item_id: int, request: Request, admin: User = Depends(AdminUser)
                 detail={"name": item.name, "barcode": item.barcode, "note": "软删=retired"}, request=request)
     db.commit()
     return ok(item_row(item))
+
+
+# ---------- 彻底删除（仅超级管理员，2026-11-04） ----------
+
+class PurgeBody(BaseModel):
+    confirm_name: str = Field(min_length=1, max_length=200, description="必须与物品名称完全一致")
+    reason: str = Field(default="", max_length=300, description="删除原因（写入归档与审计）")
+
+
+@router.post("/{item_id}/purge")
+def purge_item(
+    item_id: int, body: PurgeBody, request: Request,
+    superadmin: User = Depends(SuperAdminUser), db: Session = Depends(get_db),
+):
+    """彻底删除物品档案（超级管理员）。
+
+    用 POST 而非 DELETE：需要带 body（确认名称 + 删除原因），且属于「动作」而非
+    单纯资源删除；DELETE 带 body 在部分客户端/代理上不被支持。
+
+    与软删的区别：不受「有库存/流水」拦截。
+    处理方式：物品行从 items 表移除、条码释放可再分配；库存行归零、流水与
+    已过账单据明细全部保留（改指「已删除物品」占位档案，快照字段仍是原值）；
+    原始快照进 deleted_items 归档表，可恢复。
+    """
+    try:
+        res = purge_svc.purge_item(
+            db, item_id=item_id, operator=superadmin,
+            reason=body.reason, confirm_name=body.confirm_name,
+        )
+        write_audit(db, action="purge", entity="item", entity_id=item_id, user=superadmin,
+                    detail={"name": res["deleted"]["name"], "barcode": res["deleted"]["barcode"],
+                            "reason": body.reason, "impact": res["impact"]}, request=request)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return ok(res)
 
 
 # ---------- 别名 ----------

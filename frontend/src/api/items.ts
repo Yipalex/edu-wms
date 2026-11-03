@@ -1,5 +1,6 @@
 import { request, requestPaged } from './client';
 import type {
+  DeletedItemArchive,
   DuplicateGroup,
   Item,
   ItemCreatePayload,
@@ -7,6 +8,8 @@ import type {
   ItemMergeLogEntry,
   MergeResult,
   Paginated,
+  PurgeResult,
+  RestoreResult,
 } from './types';
 
 export interface ItemListParams {
@@ -40,6 +43,41 @@ export function updateItem(id: number, payload: Partial<ItemCreatePayload>): Pro
 
 export function deleteItem(id: number): Promise<null> {
   return request<null>({ method: 'DELETE', url: `/items/${id}` });
+}
+
+/**
+ * 彻底删除物品档案（仅超级管理员）。
+ * 不受「有库存/流水」拦截：物品档案从名录移除、条码释放可再分配；
+ * 库存行归零、流水与已过账单据明细全部保留（改指占位档案，快照仍是原值）；
+ * 原始快照进归档表，可恢复。
+ */
+export function purgeItem(
+  id: number,
+  payload: { confirm_name: string; reason?: string },
+): Promise<PurgeResult> {
+  return request<PurgeResult>({ method: 'POST', url: `/items/${id}/purge`, data: payload });
+}
+
+/** 已彻底删除的物品档案列表（仅超级管理员） */
+export function listDeletedItems(params?: {
+  page?: number;
+  page_size?: number;
+  q?: string;
+}): Promise<Paginated<DeletedItemArchive>> {
+  return requestPaged<DeletedItemArchive>({
+    method: 'GET',
+    url: '/items/deleted/list',
+    params,
+  });
+}
+
+/** 恢复已彻底删除的物品档案（仅超级管理员） */
+export function restoreDeletedItem(archiveId: number): Promise<RestoreResult> {
+  return request<RestoreResult>({
+    method: 'POST',
+    url: `/items/deleted/${archiveId}/restore`,
+    data: {},
+  });
 }
 
 /** 上传照片（multipart；手机拍照直传同用此接口） */

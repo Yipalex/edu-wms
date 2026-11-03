@@ -54,6 +54,21 @@ def require_any_role(roles: Sequence[str]) -> Callable[..., User]:
     return require_role(*roles)
 
 
+def require_super_admin() -> Callable[..., User]:
+    """超级管理员：仅 superadmin 角色。
+
+    与 admin 的区别：admin 能管物品档案/用户/单据；superadmin 额外拥有
+    「彻底删除物品档案」「查看与恢复已删除档案」等不可逆或高风险操作。
+    """
+
+    def _dep(user: User = Depends(get_current_user)) -> User:
+        if user.role != "superadmin":
+            raise BizError("权限不足：本操作仅限超级管理员", code="ERR_FORBIDDEN", status=403)
+        return user
+
+    return _dep
+
+
 def require_refresh_not_blacklisted(jti: str, db: Session) -> None:
     """校验 refresh token 的 jti 不在黑名单中。"""
     if db.scalar(select(RefreshTokenBlacklist).where(RefreshTokenBlacklist.jti == jti)) is not None:

@@ -20,7 +20,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ArrowLeftOutlined, DeleteOutlined, PrinterOutlined, SaveOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, DeleteOutlined, PrinterOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as itemsApi from '@/api/items';
@@ -29,6 +29,7 @@ import type { InventoryRow, ItemCreatePayload, StockMovement } from '@/api/types
 import PageContainer from '@/components/PageContainer';
 import ItemPhotoWall from '@/components/ItemPhotoWall';
 import BarcodePreview from '@/components/BarcodePreview';
+import PurgeItemModal from '@/components/PurgeItemModal';
 import { useAuthStore } from '@/stores/authStore';
 import {
   CHANGE_TYPE_LABELS,
@@ -54,7 +55,9 @@ export default function ItemDetail() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(searchParams.get('edit') === '1');
-  const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin' || s.user?.role === 'superadmin');
+  const isSuperAdmin = useAuthStore((s) => s.user?.role === 'superadmin');
+  const [purgeOpen, setPurgeOpen] = useState(false);
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -221,6 +224,11 @@ export default function ItemDetail() {
                 删除档案
               </Button>
             </Popconfirm>
+          )}
+          {isSuperAdmin && !isNew && detail && detail.status !== 'merged' && (
+            <Button danger icon={<ThunderboltOutlined />} onClick={() => setPurgeOpen(true)}>
+              彻底删除
+            </Button>
           )}
         </Space>
       }
@@ -410,6 +418,17 @@ export default function ItemDetail() {
           )}
         </Col>
       </Row>
+
+      {/* 彻底删除确认（仅超级管理员） */}
+      <PurgeItemModal
+        item={purgeOpen && detail ? detail : null}
+        onClose={() => setPurgeOpen(false)}
+        onDone={() => {
+          setPurgeOpen(false);
+          queryClient.invalidateQueries({ queryKey: ['items'] });
+          navigate('/items', { replace: true });
+        }}
+      />
     </PageContainer>
   );
 }

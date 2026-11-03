@@ -29,7 +29,9 @@ export function useAuth() {
   return {
     user,
     isAuthenticated: !!accessToken,
-    isAdmin: user?.role === 'admin',
+    // 超级管理员拥有管理员的全部能力
+    isAdmin: user?.role === 'admin' || user?.role === 'superadmin',
+    isSuperAdmin: user?.role === 'superadmin',
     roleLabel: user ? ROLE_LABELS[user.role] : '',
     login,
     logout,

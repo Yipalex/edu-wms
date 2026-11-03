@@ -58,5 +58,6 @@ export const useAuthStore = create<AuthState>((set) => ({
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: '管理员',
+  superadmin: '超级管理员',
   operator: '仓库操作员',
 };

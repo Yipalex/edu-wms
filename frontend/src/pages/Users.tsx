@@ -113,7 +113,11 @@ export default function Users() {
       title: '角色',
       dataIndex: 'role',
       width: 110,
-      render: (v: UserRole) => <Tag color={v === 'admin' ? 'gold' : 'blue'}>{ROLE_LABELS[v]}</Tag>,
+      render: (v: UserRole) => (
+        <Tag color={v === 'superadmin' ? 'red' : v === 'admin' ? 'gold' : 'blue'}>
+          {ROLE_LABELS[v]}
+        </Tag>
+      ),
     },
     {
       title: '默认库位',
@@ -227,6 +231,7 @@ export default function Users() {
           <Form.Item name="role" label="角色" rules={[{ required: true }]}>
             <Select
               options={[
+                { value: 'superadmin', label: '超级管理员（含彻底删除物品档案）' },
                 { value: 'admin', label: '管理员' },
                 { value: 'operator', label: '仓库操作员' },
               ]}

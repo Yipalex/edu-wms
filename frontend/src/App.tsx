@@ -25,6 +25,7 @@ const Inventory = React.lazy(() => import('@/pages/Inventory'));
 const Movements = React.lazy(() => import('@/pages/Movements'));
 const Reports = React.lazy(() => import('@/pages/Reports'));
 const Duplicates = React.lazy(() => import('@/pages/Duplicates'));
+const DeletedItems = React.lazy(() => import('@/pages/DeletedItems'));
 
 function PageLoading() {
   return (
@@ -57,6 +58,14 @@ export default function App() {
             element={
               <RoleRoute role="admin">
                 <Duplicates />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/items/deleted"
+            element={
+              <RoleRoute role="superadmin">
+                <DeletedItems />
               </RoleRoute>
             }
           />

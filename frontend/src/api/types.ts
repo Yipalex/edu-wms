@@ -28,9 +28,68 @@ export interface Paginated<T> {
   meta: PageMeta;
 }
 
+// ========== 彻底删除物品档案（超级管理员，2026-11-04） ==========
+
+/** 彻底删除的影响面统计 */
+export interface PurgeImpact {
+  stock_rows: number;
+  stock_qty: number;
+  movements: number;
+  inbound_lines: number;
+  outbound_lines: number;
+  return_lines: number;
+  stocktake_lines: number;
+  photos: number;
+  aliases: number;
+  barcode_history: number;
+  merge_logs: number;
+  merged_children: number;
+}
+
+export interface PurgeResult {
+  ok: boolean;
+  deleted: {
+    origin_item_id: number;
+    barcode: string | null;
+    name: string;
+    archive_id: number;
+    placeholder_item_id: number;
+  };
+  impact: PurgeImpact;
+}
+
+/** 已彻底删除的物品档案（归档记录） */
+export interface DeletedItemArchive {
+  id: number;
+  origin_item_id: number;
+  barcode: string | null;
+  name: string;
+  category_name: string | null;
+  spec: string;
+  unit: string;
+  suggest_price: number | null;
+  impact: Partial<PurgeImpact>;
+  reason: string;
+  operator_name: string | null;
+  deleted_at: string | null;
+  restored_at: string | null;
+  restored_by: string | null;
+}
+
+export interface RestoreResult {
+  ok: boolean;
+  restored: {
+    item_id: number;
+    name: string;
+    barcode: string | null;
+    barcode_skipped: boolean;
+    archive_id: number;
+  };
+}
+
 // ========== 用户与权限 ==========
 
-export type UserRole = 'admin' | 'operator';
+export type UserRole = 'admin' | 'superadmin' | 'operator';
 
 export interface User {
   id: number;
@@ -60,7 +119,7 @@ export interface RefreshResult {
 export interface Location {
   id: number;
   code: string; // HQ / JC / ST / HD / MZ / KFQ
-  name: string; // 总部仓库 / 城东校区 ...
+  name: string; // 总校办仓库 / 金城校区 ...
   type: 'warehouse' | 'campus';
   is_front_warehouse: boolean;
   sort_order: number;
@@ -530,7 +589,7 @@ export interface ItemMergeLogEntry {
   created_at: string;
 }
 
-// ========== 销售扣减（供 yj.example.com 对接） ==========
+// ========== 销售扣减（供 yj.zexishuhua.com 对接） ==========
 
 export interface SalesDeductResult {
   doc_no: string;
