@@ -7,6 +7,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -19,7 +20,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ArrowLeftOutlined, PrinterOutlined, SaveOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, DeleteOutlined, PrinterOutlined, SaveOutlined } from '@ant-design/icons';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as itemsApi from '@/api/items';
@@ -28,6 +29,7 @@ import type { InventoryRow, ItemCreatePayload, StockMovement } from '@/api/types
 import PageContainer from '@/components/PageContainer';
 import ItemPhotoWall from '@/components/ItemPhotoWall';
 import BarcodePreview from '@/components/BarcodePreview';
+import { useAuthStore } from '@/stores/authStore';
 import {
   CHANGE_TYPE_LABELS,
   DOC_TYPE_LABELS,
@@ -50,7 +52,9 @@ export default function ItemDetail() {
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(searchParams.get('edit') === '1');
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -114,6 +118,22 @@ export default function ItemDetail() {
     },
     { title: '单据号', dataIndex: 'doc_no', ellipsis: true, render: (v: string | null) => v ?? '—' },
   ];
+
+  /** 软删（仅管理员）：状态置为已停用；有库存/流水时后端 409 并提示 */
+  const onDelete = async () => {
+    if (!itemId) return;
+    setDeleting(true);
+    try {
+      await itemsApi.deleteItem(itemId);
+      message.success('已删除该物品（状态变为已停用，可在物品档案按状态筛选查看）');
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+      navigate('/items', { replace: true });
+    } catch {
+      // 拦截器已统一弹出中文错误
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const submit = async () => {
     const values = await form.validateFields();
@@ -187,6 +207,20 @@ export default function ItemDetail() {
             <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={submit}>
               {isNew ? '创建' : '保存'}
             </Button>
+          )}
+          {isAdmin && !isNew && detail?.status === 'active' && (
+            <Popconfirm
+              title={`删除物品「${detail.name}」？`}
+              description="软删除：状态变为「已停用」，可用状态筛选找回；有库存或流水的物品无法删除。"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={onDelete}
+            >
+              <Button danger icon={<DeleteOutlined />} loading={deleting}>
+                删除档案
+              </Button>
+            </Popconfirm>
           )}
         </Space>
       }

@@ -9,22 +9,25 @@ import {
   List,
   Modal,
   Pagination,
+  Popconfirm,
   Row,
   Select,
   Space,
   Table,
   Tag,
   Typography,
+  message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined, PrinterOutlined, SearchOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { DeleteOutlined, PlusOutlined, PrinterOutlined, SearchOutlined } from '@ant-design/icons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import * as itemsApi from '@/api/items';
 import * as categoriesApi from '@/api/categories';
 import type { Item } from '@/api/types';
 import PageContainer from '@/components/PageContainer';
 import BarcodePreview from '@/components/BarcodePreview';
+import { useAuthStore } from '@/stores/authStore';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePagination } from '@/hooks/usePagination';
 import { ITEM_STATUS_LABELS, fmtMoney, fmtQty } from '@/utils/format';
@@ -34,8 +37,10 @@ import { ITEM_STATUS_LABELS, fmtMoney, fmtQty } from '@/utils/format';
  */
 export default function Items() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const { page, pageSize, setPage, setPageSize, makeTablePagination, reset } = usePagination(20);
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   const [filters, setFilters] = useState<{
     q?: string;
     category_id?: number;
@@ -46,6 +51,22 @@ export default function Items() {
   }>({});
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [previewCode, setPreviewCode] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  /** 软删（仅管理员）：状态置为已停用，有库存/流水时后端返回 409 并提示 */
+  const onDelete = async (r: Item) => {
+    setDeletingId(r.id);
+    try {
+      await itemsApi.deleteItem(r.id);
+      message.success(`已删除「${r.name}」（状态变为已停用，可用状态筛选查看）`);
+      setSelectedIds((prev) => prev.filter((id) => id !== r.id));
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+    } catch {
+      // 拦截器已统一弹出中文错误（如：仍有库存/流水不能删除）
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -132,7 +153,7 @@ export default function Items() {
       {
         title: '操作',
         key: 'actions',
-        width: 190,
+        width: 240,
         render: (_, r) => (
           <Space size={4}>
             <Button type="link" size="small" onClick={() => navigate(`/items/${r.id}`)}>
@@ -151,11 +172,31 @@ export default function Items() {
                 打印
               </Button>
             )}
+            {isAdmin && r.status === 'active' && (
+              <Popconfirm
+                title={`删除物品「${r.name}」？`}
+                description="软删除：状态变为「已停用」，可用状态筛选找回；有库存或流水的物品无法删除。"
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => onDelete(r)}
+              >
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={deletingId === r.id}
+                >
+                  删除
+                </Button>
+              </Popconfirm>
+            )}
           </Space>
         ),
       },
     ],
-    [navigate],
+    [navigate, isAdmin, deletingId],
   );
 
   const updateFilter = (patch: Partial<typeof filters>) => {
