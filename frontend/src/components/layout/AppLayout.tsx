@@ -148,6 +148,7 @@ export default function AppLayout() {
           <img src="/img/zexi-logo.png" alt="" className="zx-topbar__logo" />
           泽曦书画
         </a>
+        <div className="zx-topbar__spacer" />
         <div className={`zx-sys-switch${sysOpen ? ' zx-sys-switch--open' : ''}`} ref={sysRef}>
           <button
             type="button"
@@ -185,7 +186,6 @@ export default function AppLayout() {
             </div>
           )}
         </div>
-        <div className="zx-topbar__spacer" />
         <button type="button" className="zx-icon-btn" aria-label="通知">
           <BellOutlined />
         </button>
