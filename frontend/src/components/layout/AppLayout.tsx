@@ -24,7 +24,8 @@ import {
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { ROLE_LABELS } from '@/stores/authStore';
+import { getMe } from '@/api/auth';
+import { ROLE_LABELS, useAuthStore } from '@/stores/authStore';
 
 const { useBreakpoint } = Grid;
 
@@ -97,6 +98,15 @@ export default function AppLayout() {
   const isMobile = !screens.md; // <768px
   const [sysOpen, setSysOpen] = useState(false);
   const sysRef = useRef<HTMLDivElement>(null);
+
+  // 启动时从服务端刷新当前用户（角色提升/头像修改后无需重新登录即可生效）
+  const setUser = useAuthStore((s) => s.setUser);
+  useEffect(() => {
+    getMe()
+      .then((me) => setUser({ ...useAuthStore.getState().user, ...me }))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 点击外部关闭系统切换菜单
   useEffect(() => {
