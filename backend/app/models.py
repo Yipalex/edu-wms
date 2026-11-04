@@ -89,6 +89,9 @@ class User(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     last_login_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    # 头像（2026-11-04）：base64 PNG，与工作台统一账号体系同步
+    avatar_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"), default=utcnow, onupdate=utcnow)
 

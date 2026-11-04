@@ -101,6 +101,9 @@ export interface User {
   last_login_at: string | null;
   created_at?: string;
   updated_at?: string;
+  /** 头像：base64 PNG 存库；has_avatar=false 时前端显示名字首字兜底 */
+  has_avatar?: boolean;
+  avatar_url?: string | null;
 }
 
 export interface LoginResult {

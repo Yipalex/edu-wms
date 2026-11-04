@@ -223,6 +223,9 @@ body {
   color: #fff;
   font-size: 12px;
   font-weight: 600;
+  overflow: hidden;
+  position: relative;
+  flex: none;
 }
 .zx-user__role {
   color: var(--zx-dark-text-2);
@@ -768,18 +771,18 @@ body {
 
 /* 品牌印章（透明底 logo 图片） */
 .login-brand__logo {
-  width: 64px;
-  height: 64px;
+  width: 84px;
+  height: 84px;
   object-fit: contain;
   display: block;
   margin: 0 auto 14px;
-  filter: drop-shadow(0 3px 10px rgba(163, 67, 50, 0.26));
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, .16));
 }
 
 /* 顶栏品牌位 logo */
 .zx-topbar__logo {
-  height: 26px;
-  width: 26px;
+  height: 30px;
+  width: 30px;
   object-fit: contain;
   display: block;
   flex: none;
@@ -842,4 +845,20 @@ body {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ============ 圆形头像（图片铺满，文字首字兜底） ============ */
+.zx-user__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 50%;
+  position: absolute;
+  inset: 0;
+}
+.zx-user__avatar-txt {
+  position: relative;
+  z-index: 1;
+  line-height: 1;
 }

@@ -139,13 +139,15 @@ export default function AppLayout() {
 
   const displayName = user?.display_name ?? user?.username ?? '';
   const avatarChar = displayName.slice(0, 1) || '泽';
+  // 圆形头像：有头像图则显示图片（失败自动回退到名字首字）
+  const avatarImg = user?.avatar_url || (user?.has_avatar ? `/api/auth/avatars/${user.id}` : '');
 
   return (
     <>
       {/* ============ 全局顶栏 ============ */}
       <header className="zx-topbar">
         <a className="zx-topbar__brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
-          <img src="/img/zexi-logo.png" alt="" className="zx-topbar__logo" />
+          <img src="/img/zexi-logo.png?v=20261104d" alt="" className="zx-topbar__logo" />
           泽曦书画
         </a>
         <div className="zx-topbar__spacer" />
@@ -190,7 +192,12 @@ export default function AppLayout() {
           <BellOutlined />
         </button>
         <div className="zx-user">
-          <span className="zx-user__avatar">{avatarChar}</span>
+          <span className="zx-user__avatar">
+            {avatarImg ? (
+              <img src={avatarImg} alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            ) : null}
+            <span className="zx-user__avatar-txt">{avatarChar}</span>
+          </span>
           <span className="zx-user__name">{displayName}</span>
           <span className="zx-user__role">{roleLabel || ROLE_LABELS[user?.role ?? 'operator']}</span>
         </div>
@@ -219,7 +226,12 @@ export default function AppLayout() {
             </div>
           ))}
           <div className="zx-sidebar__user">
-            <span className="zx-user__avatar">{avatarChar}</span>
+            <span className="zx-user__avatar">
+            {avatarImg ? (
+              <img src={avatarImg} alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            ) : null}
+            <span className="zx-user__avatar-txt">{avatarChar}</span>
+          </span>
             <span>
               <div className="zx-sidebar__user-name">{displayName}</div>
               <div className="zx-sidebar__user-role">
