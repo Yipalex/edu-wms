@@ -145,7 +145,7 @@ def _build_lines(db: Session, lines: list[ReturnLineIn]) -> list[ReturnItem]:
 def _check_editable(o: ReturnOrder, user: User) -> None:
     if o.accept_state != "draft" or o.state != "pending":
         raise BizError("该退库单已验收或已拒收，不能再修改", code="ERR_DOC_NOT_DRAFT", status=409)
-    if user.role != "admin" and o.operator_id != user.id:
+    if user.role not in ("admin", "superadmin") and o.operator_id != user.id:
         raise BizError("只能修改自己创建的草稿单", code="ERR_FORBIDDEN", status=403)
 
 

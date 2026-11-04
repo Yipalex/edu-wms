@@ -40,10 +40,14 @@ def get_current_user(
 
 
 def require_role(*roles: str) -> Callable[..., User]:
-    """生成一个依赖：当前用户必须拥有指定角色之一。"""
+    """生成一个依赖：当前用户必须拥有指定角色之一。
+
+    superadmin 是全部角色的超集：任何 require_role(...) 都放行 superadmin
+    （与前端 RoleRoute 的约定一致，否则超管连新建物品等基础操作都会被拒）。
+    """
 
     def _dep(user: User = Depends(get_current_user)) -> User:
-        if user.role not in roles:
+        if user.role != "superadmin" and user.role not in roles:
             raise BizError("权限不足：本操作仅限管理员", code="ERR_FORBIDDEN", status=403)
         return user
 

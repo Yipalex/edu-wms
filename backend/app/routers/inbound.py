@@ -148,7 +148,7 @@ def _check_editable(o: InboundOrder, user: User) -> None:
     if o.state != "draft":
         raise BizError("只有草稿状态的单据才能修改；已过账的单据请先作废（管理员）",
                        code="ERR_DOC_NOT_DRAFT", status=409)
-    if user.role != "admin" and o.operator_id != user.id:
+    if user.role not in ("admin", "superadmin") and o.operator_id != user.id:
         raise BizError("只能修改自己创建的草稿单", code="ERR_FORBIDDEN", status=403)
 
 
