@@ -16,38 +16,7 @@ import { changePassword, updateProfile, uploadAvatar } from '@/api/auth';
 import { useAuthStore } from '@/stores/authStore';
 import PageContainer from '@/components/PageContainer';
 import { isMockMode } from '@/api/client';
-
-/** 头像裁剪：居中裁正方形 → 缩放 256px → PNG（与其他系统统一） */
-async function processAvatar(file: File): Promise<Blob> {
-  if (!/^image\//.test(file.type)) throw new Error('请选择图片文件');
-  if (file.size > 12 * 1024 * 1024) throw new Error('图片太大，请选择 12MB 以以内的图片');
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('图片无法读取，请换一张试试'));
-      el.src = url;
-    });
-    const side = Math.min(img.width, img.height);
-    const sx = Math.floor((img.width - side) / 2);
-    const sy = Math.floor((img.height - side) / 2);
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('图片处理失败，请换一张试试');
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, sx, sy, side, side, 0, 0, 256, 256);
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((b) => resolve(b), 'image/png'),
-    );
-    if (!blob) throw new Error('图片处理失败，请换一张试试');
-    return blob;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+import AvatarCropModal from '@/pages/AvatarCropModal';
 
 /** 我的（移动端 Tab 第 5 项）：圆形头像、基本资料、改密码、退出登录 */
 export default function Me() {
@@ -58,20 +27,21 @@ export default function Me() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const displayName = user?.display_name ?? '';
   const currentAvatar =
     avatarSrc ?? (user?.avatar_url ?? (user?.has_avatar ? `/api/auth/avatars/${user.id}` : null));
 
-  const onPick = async (file: File) => {
+  const doUpload = async (blob: Blob) => {
+    if (!user) return;
     setUploading(true);
     try {
-      const blob = await processAvatar(file);
       const res = await uploadAvatar(blob);
-      const url = res?.avatar_url ?? `/api/auth/avatars/${user?.id}?v=${Date.now()}`;
+      const url = res?.avatar_url ?? `/api/auth/avatars/${user.id}?v=${Date.now()}`;
       setAvatarSrc(url);
-      if (user) setUser({ ...user, has_avatar: true, avatar_url: url });
+      setUser({ ...user, has_avatar: true, avatar_url: url });
       message.success('头像已更新');
     } catch (e) {
       message.error((e as Error).message || '头像上传失败');
@@ -150,8 +120,16 @@ export default function Me() {
               hidden
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) void onPick(f);
+                if (f) setCropFile(f);
                 e.target.value = '';
+              }}
+            />
+            <AvatarCropModal
+              file={cropFile}
+              onCancel={() => setCropFile(null)}
+              onOk={(blob) => {
+                setCropFile(null);
+                void doUpload(blob);
               }}
             />
           </div>
