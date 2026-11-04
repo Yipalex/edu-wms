@@ -856,9 +856,9 @@ body {
   border-radius: 50%;
   position: absolute;
   inset: 0;
+  z-index: 1;
 }
 .zx-user__avatar-txt {
-  position: relative;
-  z-index: 1;
+  line-height: 1;
   line-height: 1;
 }
