@@ -167,6 +167,7 @@ export default function Inventory() {
     {
       title: '名称',
       dataIndex: 'item_name',
+      width: 200,
       ellipsis: true,
       render: (v: string | null) => v ?? '—',
     },
@@ -387,7 +388,7 @@ export default function Inventory() {
           loading={isFetching}
           size="middle"
           pagination={makeTablePagination(data?.meta.total ?? 0)}
-          scroll={{ x: 1080 }}
+          scroll={{ x: 1500 }}
           onRow={(r) =>
             r.below_safety ? { style: { background: '#F3E2DE' } } : {}
           }
