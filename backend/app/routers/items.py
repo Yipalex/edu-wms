@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.db import get_db
-from app.deps import get_current_user, require_role, require_super_admin
+from app.deps import can_see_cost_prices, deny_teacher, get_current_user, require_role, require_super_admin
 from app.models import (
     BarcodeHistory, Category, DeletedItem, Inventory, Item, ItemAlias, ItemMergeLog, ItemPhoto,
     StockMovement, User,
@@ -56,6 +56,8 @@ class ItemCreate(BaseModel):
     category_id: int
     spec: str = Field(default="", max_length=100)
     suggest_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    purchase_price: Decimal | None = Field(default=None, ge=0, decimal_places=2, description="真实采购价（仅管理员可见）")
+    internal_price: Decimal | None = Field(default=None, ge=0, decimal_places=2, description="内部销售价：总校办→校区（仅管理员可见）")
     unit: str = Field(default="件", max_length=20)
     need_label: bool = True
     print_mode: str = Field(default="label", pattern=r"^(label|scan_card)$")
@@ -68,6 +70,8 @@ class ItemPatch(BaseModel):
     category_id: int | None = None
     spec: str | None = Field(default=None, max_length=100)
     suggest_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    purchase_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    internal_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
     unit: str | None = Field(default=None, max_length=20)
     need_label: bool | None = None
     print_mode: str | None = Field(default=None, pattern=r"^(label|scan_card)$")
@@ -85,7 +89,8 @@ def photo_url(p: ItemPhoto) -> str:
     return f"/api/uploads/{p.file_path}"
 
 
-def item_row(i: Item, *, with_stock: bool = False, db: Session | None = None) -> dict:
+def item_row(i: Item, *, with_stock: bool = False, db: Session | None = None,
+             user: User | None = None) -> dict:
     d = {
         "id": i.id,
         "barcode": i.barcode,
@@ -106,6 +111,10 @@ def item_row(i: Item, *, with_stock: bool = False, db: Session | None = None) ->
         "created_at": i.created_at.isoformat() if i.created_at else None,
         "updated_at": i.updated_at.isoformat() if i.updated_at else None,
     }
+    # 采购价/内部销售价对教师脱敏（教师只看得到建议售价）
+    if user is None or can_see_cost_prices(user):
+        d["purchase_price"] = float(i.purchase_price) if i.purchase_price is not None else None
+        d["internal_price"] = float(i.internal_price) if i.internal_price is not None else None
     photos = i.photos or []
     d["photo_count"] = len(photos)
     primary = next((p for p in photos if p.is_primary), photos[0] if photos else None)
@@ -157,7 +166,7 @@ def list_items(
     has_photo: bool | None = None,
     pending_code: bool | None = None,
     sort_by: str = "id", sort_dir: str = "asc",
-    _: User = Depends(get_current_user), db: Session = Depends(get_db),
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     page = max(1, page)
     page_size = min(200, max(1, page_size))
@@ -201,7 +210,7 @@ def list_items(
     for c in conds:
         q_stmt = q_stmt.where(c)
     rows = db.scalars(q_stmt).all()
-    return ok_page([item_row(i, with_stock=True, db=db) for i in rows],
+    return ok_page([item_row(i, with_stock=True, db=db, user=user) for i in rows],
                    page=page, page_size=page_size, total=total)
 
 
@@ -305,6 +314,7 @@ def list_merges(
 
 @router.post("")
 def create_item(body: ItemCreate, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    deny_teacher(user, "新增物品")
     cat = db.get(Category, body.category_id)
     if cat is None:
         raise BizError("类目不存在", code="ERR_NOT_FOUND", status=404)
@@ -313,6 +323,8 @@ def create_item(body: ItemCreate, request: Request, user: User = Depends(get_cur
         category_id=body.category_id,
         spec=body.spec,
         suggest_price=body.suggest_price,
+        purchase_price=body.purchase_price,
+        internal_price=body.internal_price,
         unit=body.unit,
         need_label=body.need_label,
         print_mode=body.print_mode,
@@ -337,7 +349,7 @@ def create_item(body: ItemCreate, request: Request, user: User = Depends(get_cur
                 detail={"name": item.name, "barcode": item.barcode}, request=request)
     db.commit()
     db.refresh(item)
-    return ok(item_row(item))
+    return ok(item_row(item, user=user))
 
 
 # ---------- 已彻底删除的档案（仅超级管理员） ----------
@@ -393,11 +405,11 @@ def restore_deleted_item(
 
 
 @router.get("/{item_id}")
-def get_item(item_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_item(item_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     item = db.get(Item, item_id)
     if item is None:
         raise BizError("物品不存在", code="ERR_NOT_FOUND", status=404)
-    d = item_row(item, with_stock=True, db=db)
+    d = item_row(item, with_stock=True, db=db, user=user)
     d["photos"] = [
         {"id": p.id, "url": photo_url(p), "file_size": p.file_size,
          "is_primary": p.is_primary, "source": p.source, "sort_order": p.sort_order,
@@ -446,6 +458,7 @@ def get_item(item_id: int, _: User = Depends(get_current_user), db: Session = De
 
 @router.patch("/{item_id}")
 def patch_item(item_id: int, body: ItemPatch, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    deny_teacher(user, "修改物品档案")
     item = _get_item_or_404(db, item_id)
     if item.status == "merged":
         raise BizError("已合并的物品不能修改，请到保留项上操作", code="ERR_ITEM_MERGED", status=409)
@@ -474,7 +487,7 @@ def patch_item(item_id: int, body: ItemPatch, request: Request, user: User = Dep
             # 类目变了但条码没变：内部码分类位必须与新类目重新校验一致
             bc.check_barcode_for_item(db, item.barcode, new_cat_id, exclude_item_id=item.id)
 
-    for k in ("name", "spec", "suggest_price", "unit", "need_label", "print_mode", "remark"):
+    for k in ("name", "spec", "suggest_price", "purchase_price", "internal_price", "unit", "need_label", "print_mode", "remark"):
         if k in data:
             v = data[k]
             if k == "name" and isinstance(v, str):
@@ -493,7 +506,7 @@ def patch_item(item_id: int, body: ItemPatch, request: Request, user: User = Dep
         db.rollback()
         raise BizError("条码已被其他物品占用，一物一码不能重复", code="ERR_BARCODE_DUP", status=409)
     db.refresh(item)
-    return ok(item_row(item))
+    return ok(item_row(item, user=user))
 
 
 @router.delete("/{item_id}")
@@ -573,6 +586,7 @@ def list_aliases(item_id: int, _: User = Depends(get_current_user), db: Session 
 
 @router.post("/{item_id}/aliases")
 def add_alias(item_id: int, body: AliasCreate, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    deny_teacher(user, "维护别名")
     _get_item_or_404(db, item_id)
     alias = body.alias.strip()
     dup = db.scalar(select(ItemAlias).where(
@@ -613,6 +627,7 @@ def _save_upload(item_id: int, file: UploadFile) -> tuple[str, int]:
 def upload_photo(item_id: int, request: Request, file: UploadFile = File(...),
                  source: str = "upload",
                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    deny_teacher(user, "上传照片")
     item = _get_item_or_404(db, item_id)
     if source not in ("upload", "camera"):
         source = "upload"
@@ -634,6 +649,7 @@ def upload_photo(item_id: int, request: Request, file: UploadFile = File(...),
 @router.delete("/{item_id}/photos/{photo_id}")
 def delete_photo(item_id: int, photo_id: int, request: Request,
                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    deny_teacher(user, "删除照片")
     _get_item_or_404(db, item_id)
     p = db.get(ItemPhoto, photo_id)
     if p is None or p.item_id != item_id:
@@ -670,6 +686,7 @@ class PhotoPatch(BaseModel):
 def patch_photo(item_id: int, photo_id: int, body: PhotoPatch, request: Request,
                 user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """设主图 / 调排序。设主图时把该物品其余照片 is_primary 置 False（一物一主图）。"""
+    deny_teacher(user, "维护照片")
     _get_item_or_404(db, item_id)
     p = db.get(ItemPhoto, photo_id)
     if p is None or p.item_id != item_id:
@@ -700,6 +717,8 @@ COL_ALIASES = {
     "分类": "category", "类目": "category", "category": "category",
     "规格": "spec", "spec": "spec",
     "建议售价": "suggest_price", "售价": "suggest_price", "price": "suggest_price",
+    "采购价": "purchase_price", "真实采购价": "purchase_price", "purchase_price": "purchase_price",
+    "内部销售价": "internal_price", "内部价": "internal_price", "internal_price": "internal_price",
     "印刷方式": "print_mode", "print_mode": "print_mode",
     "单位": "unit", "unit": "unit",
     "是否贴码": "need_label", "备注": "remark",
@@ -813,7 +832,7 @@ def batch_import(request: Request, file: UploadFile = File(...),
     if not rows:
         raise BizError("没有解析到有效数据行（至少需要「物品名称」列有值）", code="ERR_IMPORT_EMPTY")
 
-    created, skipped, errors = [], [], []
+    created, updated, skipped, errors = [], [], [], []
     for line_no, row in enumerate(rows, start=2):
         # 每行一个 SAVEPOINT：单行失败只回滚该行，不影响批次内其他行
         try:
@@ -821,25 +840,48 @@ def batch_import(request: Request, file: UploadFile = File(...),
                 name = row["name"].strip()
                 cat = _resolve_category(db, row.get("category") or "其他")
                 barcode = (row.get("barcode") or "").strip() or None
-                # 已存在同码 → 跳过（幂等）
+
+                def _opt_price(field: str) -> tuple[Decimal | None, bool]:
+                    """(值, 是否提供了该列)；缺列=None,False；提供了非法值→BizError。"""
+                    raw = (row.get(field) or "").strip()
+                    if not raw:
+                        return None, False
+                    try:
+                        v = Decimal(raw)
+                        if v < 0:
+                            raise ValueError
+                    except (InvalidOperation, ValueError):
+                        raise BizError(f"价格「{raw}」不是合法的非负数字", code="ERR_IMPORT_PRICE")
+                    return v, True
+
+                # 已存在同码：带了价格列 → 视为「模板补录」更新价格；否则跳过（幂等）
                 if barcode:
                     exists = db.scalar(select(Item).where(Item.barcode == barcode))
                     if exists is not None:
-                        skipped.append({"line": line_no, "barcode": barcode,
-                                        "reason": f"条码已存在（物品：{exists.name}）"})
+                        price_updates = {}
+                        for f in ("purchase_price", "internal_price", "suggest_price"):
+                            v, present = _opt_price(f)
+                            if present:
+                                price_updates[f] = v
+                        if not price_updates:
+                            skipped.append({"line": line_no, "barcode": barcode,
+                                            "reason": f"条码已存在（物品：{exists.name}），未提供价格列，跳过"})
+                            continue
+                        old = {k: (float(getattr(exists, k)) if getattr(exists, k) is not None else None)
+                               for k in price_updates}
+                        for k, v in price_updates.items():
+                            setattr(exists, k, v)
+                        db.flush()
+                        updated.append({"line": line_no, "id": exists.id, "name": exists.name,
+                                        "barcode": barcode, "fields": list(price_updates.keys())})
                         continue
-                price = None
-                if row.get("suggest_price"):
-                    try:
-                        price = Decimal(row["suggest_price"])
-                        if price < 0:
-                            raise ValueError
-                    except (InvalidOperation, ValueError):
-                        raise BizError(f"建议售价「{row['suggest_price']}」不是合法的非负数字",
-                                       code="ERR_IMPORT_PRICE")
+                price, _ = _opt_price("suggest_price")
+                purchase, _ = _opt_price("purchase_price")
+                internal, _ = _opt_price("internal_price")
                 item = Item(
                     name=name, category_id=cat.id, barcode=None,
                     spec=row.get("spec", ""), suggest_price=price,
+                    purchase_price=purchase, internal_price=internal,
                     unit=row.get("unit", "件"),
                     need_label=_resolve_need_label(row.get("need_label")),
                     print_mode=_resolve_print_mode(row.get("print_mode")),
@@ -871,8 +913,9 @@ def batch_import(request: Request, file: UploadFile = File(...),
                             "skipped": len(skipped), "errors": len(errors)}, request=request)
         db.commit()
     return ok({
-        "created": created, "skipped": skipped, "errors": errors,
-        "created_count": len(created), "skipped_count": len(skipped),
+        "created": created, "updated": updated, "skipped": skipped, "errors": errors,
+        "created_count": len(created), "updated_count": len(updated),
+        "skipped_count": len(skipped),
         "error_count": len(errors), "dry_run": dry_run,
     })
 

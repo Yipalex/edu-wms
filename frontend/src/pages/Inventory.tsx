@@ -61,9 +61,9 @@ function summaryColumns(
   ];
 }
 
-/** 库存查询：汇总看板 + 多维筛选 + 行内编辑（admin）+ CSV 导出 */
+/** 库存查询：汇总看板 + 多维筛选 + 行内编辑（admin）+ 快速调整（admin）+ CSV 导出 */
 export default function Inventory() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isTeacher } = useAuth();
   const queryClient = useQueryClient();
   const { page, pageSize, makeTablePagination, reset } = usePagination(20);
   const [categoryId, setCategoryId] = useState<number | undefined>();
@@ -74,6 +74,10 @@ export default function Inventory() {
   const [editRow, setEditRow] = useState<InventoryListRow | null>(null);
   const [editSafety, setEditSafety] = useState<number>(0);
   const [editReserved, setEditReserved] = useState<number>(0);
+  /** 快速调整目标行（admin）：直接把库存校正为实盘数 */
+  const [adjustRow, setAdjustRow] = useState<InventoryListRow | null>(null);
+  const [adjustQty, setAdjustQty] = useState<number>(0);
+  const [adjustReason, setAdjustReason] = useState('');
   const [exporting, setExporting] = useState(false);
 
   const { data: locations } = useQuery({
@@ -84,9 +88,11 @@ export default function Inventory() {
     queryKey: ['categories'],
     queryFn: () => categoriesApi.listCategories(),
   });
+  // 汇总含全校金额，教师不可用（后端 403，这里直接不请求）
   const { data: summary } = useQuery({
     queryKey: ['inventory-summary'],
     queryFn: () => inventoryApi.getInventorySummary(),
+    enabled: !isTeacher,
   });
 
   const { data, isFetching } = useQuery({
@@ -100,6 +106,21 @@ export default function Inventory() {
         q: q || undefined,
         below_safety: belowSafety || undefined,
       }),
+  });
+
+  const adjustMutation = useMutation({
+    mutationFn: (payload: { item_id: number; location_id: number; qty_actual: number; reason?: string }) =>
+      inventoryApi.adjustInventory(payload),
+    onSuccess: (res) => {
+      message.success(res.message || '库存已调整');
+      setAdjustRow(null);
+      setAdjustReason('');
+      void queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      void queryClient.invalidateQueries({ queryKey: ['inventory-summary'] });
+    },
+    onError: () => {
+      // 拦截器已提示
+    },
   });
 
   const patchMutation = useMutation({
@@ -205,21 +226,34 @@ export default function Inventory() {
           {
             title: '操作',
             key: 'action',
-            width: 90,
+            width: 140,
             fixed: 'right' as const,
             render: (_: unknown, r: InventoryListRow) => (
-              <Button
-                type="link"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => {
-                  setEditRow(r);
-                  setEditSafety(r.safety_stock);
-                  setEditReserved(r.qty_reserved);
-                }}
-              >
-                编辑
-              </Button>
+              <Space size={0}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => {
+                    setEditRow(r);
+                    setEditSafety(r.safety_stock);
+                    setEditReserved(r.qty_reserved);
+                  }}
+                >
+                  编辑
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => {
+                    setAdjustRow(r);
+                    setAdjustQty(r.qty_on_hand);
+                    setAdjustReason('');
+                  }}
+                >
+                  调整
+                </Button>
+              </Space>
             ),
           },
         ]
@@ -231,12 +265,15 @@ export default function Inventory() {
       title="库存查询"
       description="按库位/类目/关键词查询实时库存，低于安全库存自动标红"
       extra={
-        <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void doExport()}>
-          导出 CSV
-        </Button>
+        isTeacher ? undefined : (
+          <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void doExport()}>
+            导出 CSV
+          </Button>
+        )
       }
     >
-      {/* 汇总看板 */}
+      {/* 汇总看板（含全校金额，教师不可见） */}
+      {!isTeacher && (
       <Card size="small" style={{ marginBottom: 12 }}>
         <Row gutter={[12, 12]}>
           <Col xs={8} sm={8}>
@@ -282,6 +319,7 @@ export default function Inventory() {
           ]}
         />
       </Card>
+      )}
 
       {/* 筛选 */}
       <Card size="small" style={{ marginBottom: 12 }}>
@@ -297,6 +335,7 @@ export default function Inventory() {
             }}
             options={(categories ?? []).map((c) => ({ value: c.id, label: c.name }))}
           />
+          {!isTeacher && (
           <Select
             allowClear
             showSearch
@@ -310,6 +349,7 @@ export default function Inventory() {
             }}
             options={(locations ?? []).map((l) => ({ value: l.id, label: l.name }))}
           />
+          )}
           <Input.Search
             style={{ width: 220 }}
             placeholder="名称或条码"
@@ -353,6 +393,59 @@ export default function Inventory() {
           }
         />
       </Card>
+
+      {/* admin 快速库存调整：直接填实盘数，差额写 adjust 流水 */}
+      <Modal
+        title={adjustRow ? `调整库存 · ${adjustRow.item_name ?? ''}` : ''}
+        open={!!adjustRow}
+        onCancel={() => setAdjustRow(null)}
+        onOk={() => {
+          if (!adjustRow) return;
+          adjustMutation.mutate({
+            item_id: adjustRow.item_id,
+            location_id: adjustRow.location_id,
+            qty_actual: adjustQty,
+            reason: adjustReason.trim() || undefined,
+          });
+        }}
+        confirmLoading={adjustMutation.isPending}
+        okText="确认调整"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Typography.Text type="secondary">
+            库位：{adjustRow?.location_name ?? '—'}　条码：{adjustRow?.barcode ?? '—'}
+          </Typography.Text>
+          <Typography.Text>
+            当前账面库存：<Typography.Text strong>{fmtQty(adjustRow?.qty_on_hand ?? 0)}</Typography.Text>
+          </Typography.Text>
+          <InputNumber
+            addonBefore="实盘数量"
+            min={0}
+            precision={0}
+            style={{ width: '100%' }}
+            value={adjustQty}
+            onChange={(v) => setAdjustQty(v ?? 0)}
+          />
+          {adjustRow && adjustQty !== adjustRow.qty_on_hand && (
+            <Typography.Text type={adjustQty > adjustRow.qty_on_hand ? 'success' : 'warning'}>
+              将把库存从 {fmtQty(adjustRow.qty_on_hand)} 调整为 {fmtQty(adjustQty)}（
+              {adjustQty > adjustRow.qty_on_hand ? '+' : ''}
+              {adjustQty - adjustRow.qty_on_hand} 件）
+            </Typography.Text>
+          )}
+          <Input
+            placeholder="调整原因（可选，如：期初建账补录、盘点校正）"
+            maxLength={300}
+            value={adjustReason}
+            onChange={(e) => setAdjustReason(e.target.value)}
+          />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            调整会产生一条库存流水（账面 → 实盘的差额），历史出入库单据不受影响，可在「库存流水」中查询。
+          </Typography.Text>
+        </Space>
+      </Modal>
 
       {/* admin 行内编辑 */}
       <Modal

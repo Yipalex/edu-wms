@@ -19,7 +19,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.deps import get_current_user, require_role
+from app.deps import get_current_user, require_role, teacher_home_location
 from app.models import Location, OutboundItem, OutboundOrder, Item, User
 from app.schemas.common import BizError, not_found, ok, ok_page
 from app.services import stock
@@ -142,6 +142,12 @@ def _check_editable(o: OutboundOrder, user: User) -> None:
         raise BizError("只能修改自己创建的草稿单", code="ERR_FORBIDDEN", status=403)
 
 
+def _check_teacher_scope(o: OutboundOrder, user: User) -> None:
+    """教师只能查看/操作自己校区的领用出库单。"""
+    if user.role == "teacher" and o.from_location_id != teacher_home_location(user):
+        raise BizError("只能查看本校区的单据", code="ERR_FORBIDDEN", status=403)
+
+
 # ---------- 路由 ----------
 
 @router.get("")
@@ -153,11 +159,14 @@ def list_outbound_orders(
     start: date | None = None, end: date | None = None,
     q: str | None = None,
     sort_by: str = "id", sort_dir: str = "desc",
-    _: User = Depends(get_current_user), db: Session = Depends(get_db),
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     page = max(1, page)
     page_size = min(200, max(1, page_size))
     conds = []
+    # 教师：只能看自己校区相关的单据
+    if user.role == "teacher":
+        location_id = teacher_home_location(user)
     if kind:
         conds.append(OutboundOrder.kind == kind)
     if state:
@@ -199,6 +208,11 @@ def list_outbound_orders(
 @router.post("")
 def create_outbound_order(body: OutboundCreate, request: Request,
                           user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 教师：固定为「领用出库」且只能从自己校区出（调拨是总校办的职能）
+    if user.role == "teacher":
+        body.kind = "issue"
+        body.from_location_id = teacher_home_location(user)
+        body.to_location_id = None
     _validate_locations(db, body.kind, body.from_location_id, body.to_location_id)
     doc_no = next_doc_no(db, PREFIX_OUTBOUND)
     o = OutboundOrder(
@@ -224,20 +238,26 @@ def create_outbound_order(body: OutboundCreate, request: Request,
 
 
 @router.get("/{order_id}")
-def get_outbound_order(order_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return ok(order_detail(_get_order(db, order_id)))
+def get_outbound_order(order_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    o = _get_order(db, order_id)
+    _check_teacher_scope(o, user)
+    return ok(order_detail(o))
 
 
 @router.patch("/{order_id}")
 def patch_outbound_order(order_id: int, body: OutboundPatch, request: Request,
                          user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     o = _get_order(db, order_id)
+    _check_teacher_scope(o, user)
     _check_editable(o, user)
     data = body.model_dump(exclude_unset=True)
 
     new_kind = data.get("kind", o.kind) or o.kind
     new_from = data.get("from_location_id", o.from_location_id) or o.from_location_id
     new_to = data.get("to_location_id", o.to_location_id) if "to_location_id" in data else o.to_location_id
+    if user.role == "teacher":
+        # 教师单据的校区与类型不允许变更
+        new_kind, new_from, new_to = "issue", o.from_location_id, None
     _validate_locations(db, new_kind, new_from, new_to)
 
     o.kind = new_kind
@@ -267,6 +287,7 @@ def patch_outbound_order(order_id: int, body: OutboundPatch, request: Request,
 def post_outbound_order(order_id: int, request: Request,
                         user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     o = _get_order(db, order_id)
+    _check_teacher_scope(o, user)
     if not (o.items or []):
         raise BizError("单据没有明细行，无法过账；请先扫码或手动添加物品", code="ERR_DOC_EMPTY")
     try:

@@ -56,7 +56,7 @@ function lineToUI(l: ReturnLine): DocLineUI {
   };
 }
 
-/** 退库单：校区退回总部仓库，admin 验收/拒收；已拆封按制度第十五条拒收 */
+/** 退库单：校区退回总校办仓库，admin 验收/拒收；已拆封按制度第十五条拒收 */
 export default function Returns() {
   const screens = Grid.useBreakpoint();
   const { page, pageSize, makeTablePagination, reset } = usePagination(20);
@@ -70,7 +70,7 @@ export default function Returns() {
   const [form] = Form.useForm<ReturnFormValues>();
   const itemCondition = Form.useWatch('item_condition', form);
   const qc = useQueryClient();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isTeacher, user } = useAuth();
 
   const { data, isFetching } = useQuery({
     queryKey: [
@@ -90,7 +90,7 @@ export default function Returns() {
         page_size: pageSize,
         state: stateFilter,
         item_condition: conditionFilter,
-        location_id: locationId,
+        location_id: isTeacher ? undefined : locationId,
         start: range?.[0] ? range[0].format('YYYY-MM-DD') : undefined,
         end: range?.[1] ? range[1].format('YYYY-MM-DD') : undefined,
         q: q || undefined,
@@ -168,9 +168,11 @@ export default function Returns() {
   const openCreate = () => {
     form.resetFields();
     setLines([]);
+    // 教师：从本校区退回总校办仓库（后端同样强制）
     form.setFieldsValue({
       item_condition: 'sealed',
-      to_location_id: locations?.find((l) => l.is_front_warehouse)?.id,
+      from_location_id: isTeacher ? (user?.home_location_id ?? undefined) : undefined,
+      to_location_id: isTeacher ? undefined : locations?.find((l) => l.is_front_warehouse)?.id,
       order_date: dayjs(),
     });
     setDrawer({ mode: 'create' });
@@ -300,7 +302,7 @@ export default function Returns() {
   return (
     <PageContainer
       title="退库单"
-      description="校区物品退回总部仓库：未拆封可验收，已拆封按制度第十五条拒收"
+      description="校区物品退回总校办仓库：未拆封可验收，已拆封按制度第十五条拒收"
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           新建退库单
@@ -468,14 +470,14 @@ export default function Returns() {
               label="退回校区"
               rules={[{ required: true, message: '请选择退回校区' }]}
             >
-              <Select options={locationOptions} placeholder="选择退回校区" showSearch optionFilterProp="label" />
+              <Select disabled={isTeacher} options={locationOptions} placeholder="选择退回校区" showSearch optionFilterProp="label" />
             </Form.Item>
             <Form.Item
               name="to_location_id"
               label="接收仓库"
               rules={[{ required: true, message: '请选择接收仓库' }]}
             >
-              <Select options={locationOptions} placeholder="选择接收仓库" showSearch optionFilterProp="label" />
+              <Select disabled={isTeacher} options={locationOptions} placeholder="选择接收仓库" showSearch optionFilterProp="label" />
             </Form.Item>
             <Form.Item
               name="item_condition"

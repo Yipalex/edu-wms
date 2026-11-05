@@ -68,6 +68,10 @@ export interface DeletedItemArchive {
   spec: string;
   unit: string;
   suggest_price: number | null;
+  /** 真实采购价（教师角色响应中会被剔除） */
+  purchase_price?: number | null;
+  /** 内部销售价：总校办→校区（教师角色响应中会被剔除） */
+  internal_price?: number | null;
   impact: Partial<PurgeImpact>;
   reason: string;
   operator_name: string | null;
@@ -89,7 +93,7 @@ export interface RestoreResult {
 
 // ========== 用户与权限 ==========
 
-export type UserRole = 'admin' | 'superadmin' | 'operator';
+export type UserRole = 'admin' | 'superadmin' | 'operator' | 'teacher';
 
 export interface User {
   id: number;
@@ -215,6 +219,8 @@ export interface ItemCreatePayload {
   category_id: number;
   spec?: string;
   suggest_price?: number | null;
+  purchase_price?: number | null;
+  internal_price?: number | null;
   unit?: string;
   need_label?: boolean;
   print_mode?: PrintMode;

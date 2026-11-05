@@ -1,4 +1,4 @@
-# 教培机构 WMS 后端依赖（Python 3.11+，实测于 3.13）
+# 泽曦书画 WMS 后端依赖（Python 3.11+，实测于 3.13）
 fastapi>=0.110
 uvicorn[standard]>=0.29
 sqlalchemy>=2.0

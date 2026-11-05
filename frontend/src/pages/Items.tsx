@@ -43,6 +43,8 @@ export default function Items() {
   const { page, pageSize, setPage, setPageSize, makeTablePagination, reset } = usePagination(20);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin' || s.user?.role === 'superadmin');
   const isSuperAdmin = useAuthStore((s) => s.user?.role === 'superadmin');
+  /** 教师看不到采购价/内部销售价（后端已脱敏，这里再把列藏掉） */
+  const isTeacher = useAuthStore((s) => s.user?.role === 'teacher');
   const [filters, setFilters] = useState<{
     q?: string;
     category_id?: number;
@@ -131,6 +133,24 @@ export default function Items() {
         align: 'right',
         render: (v: number | null) => fmtMoney(v),
       },
+      ...(!isTeacher
+        ? [
+            {
+              title: '采购价',
+              dataIndex: 'purchase_price',
+              width: 90,
+              align: 'right' as const,
+              render: (v: number | null) => fmtMoney(v),
+            },
+            {
+              title: '内部销售价',
+              dataIndex: 'internal_price',
+              width: 100,
+              align: 'right' as const,
+              render: (v: number | null) => fmtMoney(v),
+            },
+          ]
+        : []),
       {
         title: '贴码',
         dataIndex: 'need_label',
@@ -211,7 +231,7 @@ export default function Items() {
         ),
       },
     ],
-    [navigate, isAdmin, isSuperAdmin, deletingId],
+    [navigate, isAdmin, isSuperAdmin, isTeacher, deletingId],
   );
 
   const updateFilter = (patch: Partial<typeof filters>) => {

@@ -32,6 +32,7 @@ export function useAuth() {
     // 超级管理员拥有管理员的全部能力
     isAdmin: user?.role === 'admin' || user?.role === 'superadmin',
     isSuperAdmin: user?.role === 'superadmin',
+    isTeacher: user?.role === 'teacher',
     roleLabel: user ? ROLE_LABELS[user.role] : '',
     login,
     logout,

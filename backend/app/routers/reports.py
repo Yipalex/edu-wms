@@ -18,7 +18,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, no_teacher
 from app.models import Category, Inventory, Item, Location, StockMovement, User
 from app.schemas.common import BizError, ok, ok_page
 
@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 # ---------- 子路由（顶层 router 在文件末尾聚合） ----------
 
-reports_router = APIRouter(prefix="/reports", tags=["报表"])
-exports_router = APIRouter(prefix="/exports", tags=["导出"])
+reports_router = APIRouter(prefix="/reports", tags=["报表"], dependencies=[Depends(no_teacher("查看报表"))])
+exports_router = APIRouter(prefix="/exports", tags=["导出"], dependencies=[Depends(no_teacher("导出报表"))])
 
 
 def _day_start(d: date) -> datetime:
@@ -348,6 +348,6 @@ def export_csv(
 
 # ---------- 顶层 router（自动发现机制只认这个变量） ----------
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(no_teacher("导出报表"))])
 router.include_router(reports_router)
 router.include_router(exports_router)

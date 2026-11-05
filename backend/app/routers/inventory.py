@@ -2,6 +2,8 @@
 
 - GET   /inventory            多维查询（item_id/category_id/location_id/q/below_safety + 分页）
 - GET   /inventory/summary    按库位与按类目两个维度汇总（SKU 数/件数/金额）
+- POST  /inventory/adjust     快速库存调整（仅管理员）：直接填实盘数，写 adjust 流水留痕
+                              （解决建账初期「先有出库记录、库存为负」的对账问题）
 - PATCH /inventory/{id}       改 safety_stock / qty_reserved（A）
                               **不允许**直接改 qty_on_hand——那必须走单据以保证流水可追溯
 """
@@ -13,10 +15,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user, require_role
+from app.deps import (
+    can_see_cost_prices, get_current_user, require_role, teacher_home_location,
+)
 from app.models import Category, Inventory, Item, Location, User
 from app.schemas.common import BizError, not_found, ok, ok_page
 from app.services.audit import write_audit
+from app.services.stock import apply_movement
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/inventory", tags=["库存"])
@@ -35,11 +40,11 @@ class InventoryPatch(BaseModel):
 
 # ---------- 序列化 ----------
 
-def inv_row(inv: Inventory) -> dict:
+def inv_row(inv: Inventory, user: User | None = None) -> dict:
     item = inv.item
     price = float(item.suggest_price) if (item and item.suggest_price is not None) else None
     qty = inv.qty_on_hand or 0
-    return {
+    d = {
         "id": inv.id,
         "item_id": inv.item_id,
         "item_name": item.name if item else None,
@@ -59,6 +64,11 @@ def inv_row(inv: Inventory) -> dict:
         "below_safety": qty < (inv.safety_stock or 0),
         "updated_at": inv.updated_at.isoformat() if inv.updated_at else None,
     }
+    # 采购价/内部销售价对教师脱敏
+    if user is None or can_see_cost_prices(user):
+        d["purchase_price"] = float(item.purchase_price) if (item and item.purchase_price is not None) else None
+        d["internal_price"] = float(item.internal_price) if (item and item.internal_price is not None) else None
+    return d
 
 
 # ---------- 路由 ----------
@@ -72,10 +82,14 @@ def list_inventory(
     q: str | None = None,
     below_safety: bool | None = None,
     sort_by: str = "item_name", sort_dir: str = "asc",
-    _: User = Depends(get_current_user), db: Session = Depends(get_db),
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     page = max(1, page)
     page_size = min(500, max(1, page_size))
+
+    # 教师：只能看自己校区的库存
+    if user.role == "teacher":
+        location_id = teacher_home_location(user)
 
     # Inventory join Item（+Category 供筛选/展示）
     base = select(Inventory).join(Item, Item.id == Inventory.item_id)
@@ -112,12 +126,80 @@ def list_inventory(
     for c in conds:
         q_stmt = q_stmt.where(c)
     rows = db.scalars(q_stmt).all()
-    return ok_page([inv_row(r) for r in rows], page=page, page_size=page_size, total=total)
+    return ok_page([inv_row(r, user=user) for r in rows], page=page, page_size=page_size, total=total)
+
+
+# ---------- 快速库存调整（仅管理员；2026-11-05） ----------
+
+class InventoryAdjust(BaseModel):
+    """直接把某库位某物品的库存校正为实盘数（差额写 adjust 流水，历史单据不动）。"""
+    item_id: int
+    location_id: int
+    qty_actual: int = Field(ge=0, description="实盘数量（校正后的数量）")
+    reason: str = Field(default="", max_length=300, description="调整原因（写入流水备注）")
+
+
+@router.post("/adjust")
+def adjust_inventory(
+    body: InventoryAdjust, request: Request,
+    admin: User = Depends(AdminUser), db: Session = Depends(get_db),
+):
+    """快速库存调整：账面 0 → 实盘 10 等「先有出库、库存对不上」的建账修正。
+
+    与盘点单过账同一套机制（apply_movement + adjust 流水），只是免去建盘点单的重量流程。
+    """
+    item = db.get(Item, body.item_id)
+    if item is None:
+        raise not_found("物品不存在")
+    loc = db.get(Location, body.location_id)
+    if loc is None:
+        raise not_found("库位不存在")
+    inv = db.scalar(
+        select(Inventory).where(
+            Inventory.item_id == body.item_id, Inventory.location_id == body.location_id
+        )
+    )
+    qty_book = inv.qty_on_hand if inv is not None else 0
+    delta = body.qty_actual - qty_book
+    if delta == 0:
+        return ok({"item_id": item.id, "location_id": loc.id, "qty_before": qty_book,
+                   "qty_after": qty_book, "changed": False, "message": "实盘数与账面一致，无需调整"})
+
+    reason = (body.reason or "").strip()
+    note = f"库存调整：账面 {qty_book} → 实盘 {body.qty_actual}"
+    if reason:
+        note += f"（{reason}）"
+    try:
+        mv = apply_movement(
+            db,
+            item_id=item.id,
+            location_id=loc.id,
+            change_qty=delta,
+            doc_type="adjust",
+            doc_id=None,
+            doc_no=None,
+            operator_id=admin.id,
+            note=note,
+        )
+        write_audit(db, action="adjust_stock", entity="inventory",
+                    entity_id=inv.id if inv is not None else None, user=admin,
+                    detail={"item": item.name, "location": loc.name,
+                            "qty_before": qty_book, "qty_after": body.qty_actual,
+                            "reason": reason}, request=request)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return ok({"item_id": item.id, "location_id": loc.id, "qty_before": qty_book,
+               "qty_after": mv.qty_after, "changed": True, "movement_id": mv.id,
+               "message": f"已将「{item.name}」在 {loc.name} 的库存从 {qty_book} 调整为 {mv.qty_after}"})
 
 
 @router.get("/summary")
-def inventory_summary(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """按库位与按类目两个维度汇总（SKU 数、件数合计、金额合计）。"""
+def inventory_summary(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """按库位与按类目两个维度汇总（SKU 数、件数、金额合计）。含全校金额，教师不可用。"""
+    if user.role == "teacher":
+        raise BizError("教师角色请在「库存查询」中查看本校区的库存", code="ERR_FORBIDDEN", status=403)
     # 按库位
     by_loc_rows = db.execute(
         select(

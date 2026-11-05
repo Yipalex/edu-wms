@@ -41,21 +41,21 @@ const ZX_SYSTEMS = [
 const CURRENT_SYSTEM = ZX_SYSTEMS.find((s) => s.id === 'wms')!;
 
 /** 全部菜单（按角色过滤在下方处理） */
-const ALL_MENUS: { key: string; label: string; group?: string; adminOnly?: boolean; superOnly?: boolean }[] = [
-  { key: '/', label: '仪表盘', group: '工作台' },
+const ALL_MENUS: { key: string; label: string; group?: string; adminOnly?: boolean; superOnly?: boolean; teacherHide?: boolean }[] = [
+  { key: '/', label: '仪表盘', group: '工作台', teacherHide: true },
   { key: '/scan', label: '扫码工作台', group: '工作台' },
-  { key: '/items', label: '物品档案', group: '物品与条码' },
-  { key: '/items/pending-code', label: '待编码物品', group: '物品与条码' },
+  { key: '/items', label: '物品档案', group: '物品与条码', teacherHide: true },
+  { key: '/items/pending-code', label: '待编码物品', group: '物品与条码', teacherHide: true },
   { key: '/items/duplicates', label: '去重合并', group: '物品与条码', adminOnly: true },
   { key: '/items/deleted', label: '已删除档案', group: '物品与条码', superOnly: true },
-  { key: '/labels', label: '标签打印', group: '物品与条码' },
+  { key: '/labels', label: '标签打印', group: '物品与条码', teacherHide: true },
   { key: '/inbound', label: '入库单', group: '出入库' },
   { key: '/outbound', label: '出库/调拨', group: '出入库' },
   { key: '/returns', label: '退库单', group: '出入库' },
-  { key: '/stocktakes', label: '盘点', group: '出入库' },
+  { key: '/stocktakes', label: '盘点', group: '出入库', teacherHide: true },
   { key: '/inventory', label: '库存查询', group: '库存与报表' },
-  { key: '/movements', label: '库存流水', group: '库存与报表' },
-  { key: '/reports', label: '报表', group: '库存与报表' },
+  { key: '/movements', label: '库存流水', group: '库存与报表', teacherHide: true },
+  { key: '/reports', label: '报表', group: '库存与报表', teacherHide: true },
   { key: '/categories', label: '类目与编码规则', group: '系统设置', adminOnly: true },
   { key: '/barcode/history', label: '条码变更历史', group: '系统设置', adminOnly: true },
   { key: '/users', label: '用户与权限', group: '系统设置', adminOnly: true },
@@ -120,13 +120,15 @@ export default function AppLayout() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [sysOpen]);
 
+  const isTeacher = user?.role === 'teacher';
   const visibleMenus = useMemo(
     () => ALL_MENUS.filter((m) => {
       if (m.superOnly) return isSuperAdmin;
       if (m.adminOnly) return isAdmin;
+      if (m.teacherHide && isTeacher) return false;
       return true;
     }),
-    [isAdmin, isSuperAdmin],
+    [isAdmin, isSuperAdmin, isTeacher],
   );
 
   const navGroups = useMemo(() => {
@@ -270,7 +272,10 @@ export default function AppLayout() {
       {/* ============ 移动端底部标签栏 ============ */}
       {isMobile && (
         <nav className="zx-tabbar" aria-label="底部导航">
-          {MOBILE_TABS.map((t) => {
+          {(user?.role === 'teacher'
+            ? MOBILE_TABS.filter((t) => ['/scan', '/outbound', '/inventory', '/me'].includes(t.key))
+            : MOBILE_TABS
+          ).map((t) => {
             const active =
               t.key === '/me'
                 ? location.pathname === '/me'

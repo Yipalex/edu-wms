@@ -68,7 +68,7 @@ export default function Outbound() {
   const [lines, setLines] = useState<DocLineUI[]>([]);
   const [form] = Form.useForm<OutboundFormValues>();
   const qc = useQueryClient();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isTeacher, user } = useAuth();
 
   const { data, isFetching } = useQuery({
     queryKey: [
@@ -87,8 +87,8 @@ export default function Outbound() {
         page,
         page_size: pageSize,
         state: stateFilter,
-        kind: kindFilter,
-        location_id: locationId,
+        kind: isTeacher ? undefined : kindFilter,
+        location_id: isTeacher ? undefined : locationId,
         start: range?.[0] ? range[0].format('YYYY-MM-DD') : undefined,
         end: range?.[1] ? range[1].format('YYYY-MM-DD') : undefined,
         q: q || undefined,
@@ -159,7 +159,12 @@ export default function Outbound() {
   const openCreate = () => {
     form.resetFields();
     setLines([]);
-    form.setFieldsValue({ kind: 'transfer', order_date: dayjs() });
+    // 教师：只能是「领用出库」，且从自己校区出（后端同样强制）
+    form.setFieldsValue({
+      kind: isTeacher ? 'issue' : 'transfer',
+      from_location_id: isTeacher ? (user?.home_location_id ?? undefined) : undefined,
+      order_date: dayjs(),
+    });
     setDrawer({ mode: 'create' });
   };
 
@@ -418,8 +423,14 @@ export default function Outbound() {
           ) : null
         ) : (
           <Form form={form} layout="vertical">
-            <Form.Item name="kind" label="单据类型" rules={[{ required: true, message: '请选择单据类型' }]}>
+            <Form.Item
+              name="kind"
+              label="单据类型"
+              rules={[{ required: true, message: '请选择单据类型' }]}
+              tooltip={isTeacher ? '教师只能进行领用出库；校区间调拨由总校办操作' : undefined}
+            >
               <Radio.Group
+                disabled={isTeacher}
                 options={[
                   { value: 'transfer', label: '调拨（校区间转移）' },
                   { value: 'issue', label: '领用（出库）' },
@@ -431,7 +442,13 @@ export default function Outbound() {
               label="调出库位"
               rules={[{ required: true, message: '请选择调出库位' }]}
             >
-              <Select options={locationOptions} placeholder="选择调出库位" showSearch optionFilterProp="label" />
+              <Select
+                options={locationOptions}
+                placeholder="选择调出库位"
+                showSearch
+                optionFilterProp="label"
+                disabled={isTeacher}
+              />
             </Form.Item>
             <Form.Item
               noStyle

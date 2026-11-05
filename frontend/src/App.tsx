@@ -4,6 +4,7 @@ import { Spin } from 'antd';
 import AppLayout from '@/components/layout/AppLayout';
 import RequireAuth from '@/components/layout/RequireAuth';
 import RoleRoute from '@/components/layout/RoleRoute';
+import { useAuthStore } from '@/stores/authStore';
 
 const Login = React.lazy(() => import('@/pages/Login'));
 const Dashboard = React.lazy(() => import('@/pages/Dashboard'));
@@ -36,6 +37,20 @@ function PageLoading() {
   );
 }
 
+/** 首页：教师角色的工作入口是扫码工作台（仪表盘含全校金额，对教师不可用） */
+function HomeEntry() {
+  const role = useAuthStore((s) => s.user?.role);
+  if (role === 'teacher') return <Navigate to="/scan" replace />;
+  return <Dashboard />;
+}
+
+/** 教师禁入页：直接访问时统一送回扫码工作台（菜单已隐藏，这里兜底深链） */
+function NoTeacher({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((s) => s.user?.role);
+  if (role === 'teacher') return <Navigate to="/scan" replace />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <Suspense fallback={<PageLoading />}>
@@ -48,11 +63,20 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<HomeEntry />} />
           <Route path="/scan" element={<Scan />} />
-          <Route path="/items" element={<Items />} />
-          <Route path="/items/new" element={<ItemDetail />} />
-          <Route path="/items/pending-code" element={<PendingCode />} />
+          <Route
+            path="/items"
+            element={<NoTeacher><Items /></NoTeacher>}
+          />
+          <Route
+            path="/items/new"
+            element={<NoTeacher><ItemDetail /></NoTeacher>}
+          />
+          <Route
+            path="/items/pending-code"
+            element={<NoTeacher><PendingCode /></NoTeacher>}
+          />
           <Route
             path="/items/duplicates"
             element={
@@ -69,8 +93,14 @@ export default function App() {
               </RoleRoute>
             }
           />
-          <Route path="/items/:id" element={<ItemDetail />} />
-          <Route path="/labels" element={<Labels />} />
+          <Route
+            path="/items/:id"
+            element={<NoTeacher><ItemDetail /></NoTeacher>}
+          />
+          <Route
+            path="/labels"
+            element={<NoTeacher><Labels /></NoTeacher>}
+          />
           <Route
             path="/categories"
             element={
@@ -100,11 +130,23 @@ export default function App() {
           <Route path="/inbound" element={<Inbound />} />
           <Route path="/outbound" element={<Outbound />} />
           <Route path="/returns" element={<Returns />} />
-          <Route path="/stocktakes" element={<Stocktakes />} />
-          <Route path="/stocktakes/:id" element={<StocktakeExec />} />
+          <Route
+            path="/stocktakes"
+            element={<NoTeacher><Stocktakes /></NoTeacher>}
+          />
+          <Route
+            path="/stocktakes/:id"
+            element={<NoTeacher><StocktakeExec /></NoTeacher>}
+          />
           <Route path="/inventory" element={<Inventory />} />
-          <Route path="/movements" element={<Movements />} />
-          <Route path="/reports" element={<Reports />} />
+          <Route
+            path="/movements"
+            element={<NoTeacher><Movements /></NoTeacher>}
+          />
+          <Route
+            path="/reports"
+            element={<NoTeacher><Reports /></NoTeacher>}
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

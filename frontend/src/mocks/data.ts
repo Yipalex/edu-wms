@@ -1,6 +1,6 @@
 /**
  * Mock 数据 —— 取自真实名录 barcode-tool/output/final/items_from_minglu.csv（127 行中选 40+ 条），
- * 库位为真实 6 个（总部仓库 + 5 校区），类目为真实 6 类。
+ * 库位为真实 6 个（总校办仓库 + 5 校区），类目为真实 6 类。
  */
 import type {
   BarcodeHistoryEntry,
@@ -13,12 +13,12 @@ import type {
 } from '@/api/types';
 
 export const MOCK_LOCATIONS: Location[] = [
-  { id: 1, code: 'HQ', name: '总部仓库', type: 'warehouse', is_front_warehouse: true, sort_order: 0, is_active: true },
-  { id: 2, code: 'JC', name: '城东校区', type: 'campus', is_front_warehouse: false, sort_order: 1, is_active: true },
-  { id: 3, code: 'ST', name: '城西校区', type: 'campus', is_front_warehouse: false, sort_order: 2, is_active: true },
-  { id: 4, code: 'HD', name: '城南校区', type: 'campus', is_front_warehouse: false, sort_order: 3, is_active: true },
-  { id: 5, code: 'MZ', name: '城北校区', type: 'campus', is_front_warehouse: false, sort_order: 4, is_active: true },
-  { id: 6, code: 'KFQ', name: '高新区校区', type: 'campus', is_front_warehouse: false, sort_order: 5, is_active: true },
+  { id: 1, code: 'HQ', name: '总校办仓库', type: 'warehouse', is_front_warehouse: true, sort_order: 0, is_active: true },
+  { id: 2, code: 'JC', name: '金城校区', type: 'campus', is_front_warehouse: false, sort_order: 1, is_active: true },
+  { id: 3, code: 'ST', name: '社坛校区', type: 'campus', is_front_warehouse: false, sort_order: 2, is_active: true },
+  { id: 4, code: 'HD', name: '海东校区', type: 'campus', is_front_warehouse: false, sort_order: 3, is_active: true },
+  { id: 5, code: 'MZ', name: '麻章校区', type: 'campus', is_front_warehouse: false, sort_order: 4, is_active: true },
+  { id: 6, code: 'KFQ', name: '开发区校区', type: 'campus', is_front_warehouse: false, sort_order: 5, is_active: true },
 ];
 
 export const MOCK_CATEGORIES: Category[] = [
@@ -100,15 +100,15 @@ const SEED: SeedItem[] = [
   { barcode: '21040005', name: '墨碟', cat: 4, price: 5.0 },
   { barcode: '21040007', name: '橡皮', cat: 4, price: 1.0 },
   { barcode: '21040008', name: '毛笔', cat: 4, spec: '兼毫中楷', price: 12.0 },
-  { barcode: '21040012', name: '教培机构毛边纸', cat: 4, spec: '100张/包', price: 6.0 },
-  { barcode: '21040013', name: '教培机构铅笔', cat: 4, price: 1.5 },
-  { barcode: '21040015', name: '教培资料袋', cat: 4, price: 3.0 },
+  { barcode: '21040012', name: '泽曦书画毛边纸', cat: 4, spec: '100张/包', price: 6.0 },
+  { barcode: '21040013', name: '泽曦书画铅笔', cat: 4, price: 1.5 },
+  { barcode: '21040015', name: '泽曦资料袋', cat: 4, price: 3.0 },
   { barcode: '21040025', name: '铅笔', cat: 4, price: 1.5 },
   { barcode: '21040026', name: '镇尺', cat: 4, price: 20.0 },
   { barcode: '21040032', name: '同步套盒', cat: 4, price: 45.0 },
   { barcode: '21040042', name: '进步之星奖状', cat: 4, price: 0.8 },
   { barcode: '21040047', name: '一次性纸杯', cat: 4, spec: '50只/包', price: 6.5 },
-  { barcode: '21050001', name: '教培定制书包', cat: 5, price: 88.0 },
+  { barcode: '21050001', name: '泽曦定制书包', cat: 5, price: 88.0 },
   { barcode: '21050002', name: '黑色双肩包', cat: 5, price: 79.0 },
   { barcode: '21050007', name: '行李箱', cat: 5, price: 199.0 },
   { barcode: '21050008', name: '惊喜盲盒', cat: 5, price: 29.9 },

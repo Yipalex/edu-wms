@@ -17,9 +17,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, teacher_home_location
 from app.models import Item, Location, StockMovement, User
-from app.schemas.common import not_found, ok, ok_page
+from app.schemas.common import BizError, not_found, ok, ok_page
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/movements", tags=["库存流水"])
@@ -100,10 +100,14 @@ def list_movements(
     doc_type: str | None = None, operator_id: int | None = None,
     q: str | None = None,
     sort_by: str = "id", sort_dir: str = "desc",
-    _: User = Depends(get_current_user), db: Session = Depends(get_db),
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     page = max(1, page)
     page_size = min(500, max(1, page_size))
+
+    # 教师：只能看自己校区的流水
+    if user.role == "teacher":
+        location_id = teacher_home_location(user)
 
     base = select(StockMovement).join(Item, Item.id == StockMovement.item_id)
     conds = _build_conds(start=start, end=end, location_id=location_id,
@@ -132,9 +136,11 @@ def list_movements(
 
 
 @router.get("/{movement_id}")
-def get_movement(movement_id: int, _: User = Depends(get_current_user),
+def get_movement(movement_id: int, user: User = Depends(get_current_user),
                  db: Session = Depends(get_db)):
     m = db.get(StockMovement, movement_id)
+    if m is not None and user.role == "teacher" and m.location_id != teacher_home_location(user):
+        raise BizError("只能查看本校区的流水", code="ERR_FORBIDDEN", status=403)
     if m is None:
         raise not_found("流水记录不存在")
     return ok(mv_row(m))

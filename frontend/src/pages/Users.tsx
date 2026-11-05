@@ -228,19 +228,20 @@ export default function Users() {
           >
             <Input maxLength={50} />
           </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true }]}>
+          <Form.Item name="role" label="角色" rules={[{ required: true }]} tooltip="教师：只能看到自己校区的库存数量与建议售价，只能进行出库/入库/退库；所属校区在下方「默认库位」绑定">
             <Select
               options={[
                 { value: 'superadmin', label: '超级管理员（含彻底删除物品档案）' },
                 { value: 'admin', label: '管理员' },
                 { value: 'operator', label: '仓库操作员' },
+                { value: 'teacher', label: '教师（仅本校区出入库）' },
               ]}
             />
           </Form.Item>
-          <Form.Item name="home_location_id" label="默认库位（前端默认筛选用）">
+          <Form.Item name="home_location_id" label="所属校区 / 默认库位" tooltip="教师角色必填：决定该教师能看到哪个校区的库存与单据">
             <Select
               allowClear
-              placeholder="选择默认库位"
+              placeholder="选择校区/库位"
               options={(locations ?? []).map((l) => ({ value: l.id, label: l.name }))}
             />
           </Form.Item>

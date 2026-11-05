@@ -43,6 +43,7 @@ import ScanInput from '@/components/ScanInput';
 import StockTable from '@/components/StockTable';
 import { useScanGun } from '@/hooks/useScanGun';
 import { useCameraScan } from '@/hooks/useCameraScan';
+import { useAuth } from '@/hooks/useAuth';
 import { useScanStore } from '@/stores/scanStore';
 import { DOC_TYPE_LABELS, fmtChangeQty, fmtDateTime, fmtMoney } from '@/utils/format';
 
@@ -63,6 +64,7 @@ export default function Scan() {
   const [registerOpen, setRegisterOpen] = useState(false);
   const setLastResult = useScanStore((s) => s.setLastResult);
   const setScanPageActive = useScanStore((s) => s.setScanPageActive);
+  const { isTeacher } = useAuth();
 
   useEffect(() => {
     setScanPageActive(true);
@@ -381,15 +383,17 @@ export default function Scan() {
         >
           退库
         </Button>
-        <Button
-          className="scan-big-btn"
-          icon={<AuditOutlined />}
-          disabled={!item}
-          onClick={() => goWithItem('/stocktakes')}
-          aria-label="盘点"
-        >
-          盘点
-        </Button>
+        {!isTeacher && (
+          <Button
+            className="scan-big-btn"
+            icon={<AuditOutlined />}
+            disabled={!item}
+            onClick={() => goWithItem('/stocktakes')}
+            aria-label="盘点"
+          >
+            盘点
+          </Button>
+        )}
       </div>
 
       {/* ===== 登记新物品抽屉 ===== */}

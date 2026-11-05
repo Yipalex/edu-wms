@@ -30,6 +30,20 @@ export function patchInventory(
   return request<InventoryListRow>({ method: 'PATCH', url: `/inventory/${id}`, data: payload });
 }
 
+/** 快速库存调整（仅 admin）：把某库位某物品的库存直接校正为实盘数，差额写 adjust 流水 */
+export function adjustInventory(payload: {
+  item_id: number;
+  location_id: number;
+  qty_actual: number;
+  reason?: string;
+}) {
+  return request<{ qty_before: number; qty_after: number; changed: boolean; message: string }>({
+    method: 'POST',
+    url: '/inventory/adjust',
+    data: payload,
+  });
+}
+
 export interface MovementParams {
   page?: number;
   page_size?: number;

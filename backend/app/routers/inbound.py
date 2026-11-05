@@ -21,7 +21,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.deps import get_current_user, require_role
+from app.deps import can_see_cost_prices, get_current_user, require_role, teacher_home_location
 from app.models import InboundItem, InboundOrder, Item, Location, User
 from app.schemas.common import BizError, not_found, ok, ok_page
 from app.services import stock
@@ -63,26 +63,31 @@ class InboundPatch(BaseModel):
 
 # ---------- 序列化 ----------
 
-def line_row(l: InboundItem) -> dict:
-    return {
+def line_row(l: InboundItem, user: User | None = None) -> dict:
+    d = {
         "id": l.id, "item_id": l.item_id,
         "barcode_snapshot": l.barcode_snapshot, "name_snapshot": l.name_snapshot,
         "spec_snapshot": l.spec_snapshot,
         "qty": l.qty,
-        "purchase_price": float(l.purchase_price) if l.purchase_price is not None else None,
-        "sale_price": float(l.sale_price) if l.sale_price is not None else None,
         "sort_order": l.sort_order,
     }
+    # 采购价/内部销售价快照对教师脱敏
+    if user is None or can_see_cost_prices(user):
+        d["purchase_price"] = float(l.purchase_price) if l.purchase_price is not None else None
+        d["sale_price"] = float(l.sale_price) if l.sale_price is not None else None
+    return d
 
 
-def order_row(o: InboundOrder) -> dict:
+def order_row(o: InboundOrder, user: User | None = None) -> dict:
     return {
         "id": o.id, "doc_no": o.doc_no, "supplier": o.supplier or "",
         "location_id": o.location_id,
         "location_name": o.location.name if o.location else None,
         "is_for_sale": o.is_for_sale, "state": o.state,
         "order_date": o.order_date.isoformat() if o.order_date else None,
-        "total_amount": float(o.total_amount) if o.total_amount is not None else 0.0,
+        # 单据金额来自采购价，教师不可见
+        "total_amount": (float(o.total_amount) if o.total_amount is not None else 0.0)
+                        if (user is None or can_see_cost_prices(user)) else None,
         "remark": o.remark or "",
         "operator_id": o.operator_id,
         "posted_at": o.posted_at.isoformat() if o.posted_at else None,
@@ -91,9 +96,9 @@ def order_row(o: InboundOrder) -> dict:
     }
 
 
-def order_detail(o: InboundOrder) -> dict:
-    d = order_row(o)
-    d["items"] = [line_row(l) for l in (o.items or [])]
+def order_detail(o: InboundOrder, user: User | None = None) -> dict:
+    d = order_row(o, user=user)
+    d["items"] = [line_row(l, user=user) for l in (o.items or [])]
     return d
 
 
@@ -169,11 +174,14 @@ def list_inbound_orders(
     start: date | None = None, end: date | None = None,
     q: str | None = None,
     sort_by: str = "id", sort_dir: str = "desc",
-    _: User = Depends(get_current_user), db: Session = Depends(get_db),
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     page = max(1, page)
     page_size = min(200, max(1, page_size))
     conds = []
+    # 教师：只能看自己校区的入库单
+    if user.role == "teacher":
+        location_id = teacher_home_location(user)
     if state:
         conds.append(InboundOrder.state == state)
     if location_id is not None:
@@ -205,12 +213,16 @@ def list_inbound_orders(
     for c in conds:
         q_stmt = q_stmt.where(c)
     rows = db.scalars(q_stmt).all()
-    return ok_page([order_row(o) for o in rows], page=page, page_size=page_size, total=total)
+    return ok_page([order_row(o, user=user) for o in rows], page=page, page_size=page_size, total=total)
 
 
 @router.post("")
 def create_inbound_order(body: InboundCreate, request: Request,
                          user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 教师：入库固定到自己校区，且不带采购/内部价格（成本信息教师不可见）
+    if user.role == "teacher":
+        body.location_id = teacher_home_location(user)
+        body.items = [ln.model_copy(update={"purchase_price": None, "sale_price": None}) for ln in body.items]
     _validate_location(db, body.location_id)
     doc_no = next_doc_no(db, PREFIX_INBOUND)
     o = InboundOrder(
@@ -233,21 +245,33 @@ def create_inbound_order(body: InboundCreate, request: Request,
     except Exception:
         db.rollback()
         raise
-    return ok(order_detail(_get_order(db, o.id)))
+    return ok(order_detail(_get_order(db, o.id), user=user))
 
 
 @router.get("/{order_id}")
-def get_inbound_order(order_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return ok(order_detail(_get_order(db, order_id)))
+def _check_teacher_scope(o: InboundOrder, user: User) -> None:
+    """教师只能查看/操作自己校区的入库单。"""
+    if user.role == "teacher" and o.location_id != teacher_home_location(user):
+        raise BizError("只能查看本校区的单据", code="ERR_FORBIDDEN", status=403)
+
+
+@router.get("/{order_id}")
+def get_inbound_order(order_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    o = _get_order(db, order_id)
+    _check_teacher_scope(o, user)
+    return ok(order_detail(o, user=user))
 
 
 @router.patch("/{order_id}")
 def patch_inbound_order(order_id: int, body: InboundPatch, request: Request,
                         user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     o = _get_order(db, order_id)
+    _check_teacher_scope(o, user)
     _check_editable(o, user)
     data = body.model_dump(exclude_unset=True)
 
+    if user.role == "teacher":
+        data.pop("location_id", None)  # 教师单据的校区不允许变更
     if "location_id" in data and data["location_id"] is not None:
         _validate_location(db, data["location_id"])
         o.location_id = data["location_id"]
@@ -273,13 +297,14 @@ def patch_inbound_order(order_id: int, body: InboundPatch, request: Request,
     except Exception:
         db.rollback()
         raise
-    return ok(order_detail(_get_order(db, o.id)))
+    return ok(order_detail(_get_order(db, o.id), user=user))
 
 
 @router.post("/{order_id}/post")
 def post_inbound_order(order_id: int, request: Request,
                        user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     o = _get_order(db, order_id)
+    _check_teacher_scope(o, user)
     if not (o.items or []):
         raise BizError("单据没有明细行，无法过账；请先扫码或手动添加物品", code="ERR_DOC_EMPTY")
     try:
@@ -290,7 +315,7 @@ def post_inbound_order(order_id: int, request: Request,
     except Exception:
         db.rollback()
         raise
-    return ok(order_detail(_get_order(db, o.id)))
+    return ok(order_detail(_get_order(db, o.id), user=user))
 
 
 @router.post("/{order_id}/void")

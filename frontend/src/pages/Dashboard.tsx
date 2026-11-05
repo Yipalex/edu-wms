@@ -83,7 +83,7 @@ export default function Dashboard() {
   ];
 
   return (
-    <PageContainer title="仪表盘" description="总部仓库与五校区库存总览">
+    <PageContainer title="仪表盘" description="总校办仓库与五校区库存总览">
       <Row gutter={[12, 12]}>
         <Col xs={12} md={6}>
           <Card size="small">

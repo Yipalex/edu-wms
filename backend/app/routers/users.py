@@ -20,13 +20,13 @@ class UserCreate(BaseModel):
     username: str = Field(min_length=2, max_length=50, pattern=r"^[a-zA-Z0-9_\-]+$")
     password: str = Field(min_length=8, max_length=200)
     display_name: str = Field(min_length=1, max_length=50)
-    role: str = Field(pattern=r"^(admin|superadmin|operator)$")
+    role: str = Field(pattern=r"^(admin|superadmin|operator|teacher)$")
     home_location_id: int | None = None
 
 
 class UserPatch(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=50)
-    role: str | None = Field(default=None, pattern=r"^(admin|superadmin|operator)$")
+    role: str | None = Field(default=None, pattern=r"^(admin|superadmin|operator|teacher)$")
     home_location_id: int | None = None
     password: str | None = Field(default=None, min_length=8, max_length=200)
     is_active: bool | None = None

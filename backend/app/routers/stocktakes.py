@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.deps import get_current_user, require_role
+from app.deps import get_current_user, no_teacher, require_role
 from app.models import Category, Inventory, Item, Location, Stocktake, StocktakeItem, User
 from app.schemas.common import BizError, not_found, ok, ok_page
 from app.services import stock
@@ -30,7 +30,7 @@ from app.services.audit import write_audit
 from app.services.docno import PREFIX_STOCKTAKE, next_doc_no
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/stocktakes", tags=["盘点"])
+router = APIRouter(prefix="/stocktakes", tags=["盘点"], dependencies=[Depends(no_teacher("盘点操作"))])
 
 AdminUser = require_role("admin")
 

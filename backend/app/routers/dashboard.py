@@ -19,13 +19,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, no_teacher
 from app.models import Inventory, Item, Location, StockMovement, Stocktake, User
 from app.models import utcnow
 from app.schemas.common import ok
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/reports", tags=["仪表盘"])
+router = APIRouter(prefix="/reports", tags=["仪表盘"], dependencies=[Depends(no_teacher("查看仪表盘"))])
 
 LOW_STOCK_LIMIT = 20
 

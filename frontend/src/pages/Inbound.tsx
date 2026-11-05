@@ -64,7 +64,7 @@ export default function Inbound() {
   const [lines, setLines] = useState<DocLineUI[]>([]);
   const [form] = Form.useForm<InboundFormValues>();
   const qc = useQueryClient();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isTeacher, user } = useAuth();
 
   const { data, isFetching } = useQuery({
     queryKey: [
@@ -82,7 +82,7 @@ export default function Inbound() {
         page,
         page_size: pageSize,
         state: stateFilter,
-        location_id: locationId,
+        location_id: isTeacher ? undefined : locationId,
         start: range?.[0] ? range[0].format('YYYY-MM-DD') : undefined,
         end: range?.[1] ? range[1].format('YYYY-MM-DD') : undefined,
         q: q || undefined,
@@ -152,8 +152,10 @@ export default function Inbound() {
   const openCreate = () => {
     form.resetFields();
     setLines([]);
+    // 教师：入库固定到自己校区（后端同样强制）
     form.setFieldsValue({
-      location_id: locations?.find((l) => l.is_front_warehouse)?.id,
+      location_id: isTeacher ? (user?.home_location_id ?? undefined)
+                             : locations?.find((l) => l.is_front_warehouse)?.id,
       order_date: dayjs(),
     });
     setDrawer({ mode: 'create' });
@@ -415,7 +417,7 @@ export default function Inbound() {
               label="入库库位"
               rules={[{ required: true, message: '请选择入库库位' }]}
             >
-              <Select options={locationOptions} placeholder="选择入库库位" showSearch optionFilterProp="label" />
+              <Select disabled={isTeacher} options={locationOptions} placeholder="选择入库库位" showSearch optionFilterProp="label" />
             </Form.Item>
             <Form.Item
               name="order_date"

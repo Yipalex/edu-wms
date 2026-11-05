@@ -78,6 +78,8 @@ export default function ItemDetail() {
         barcode: detail.barcode ?? '',
         spec: detail.spec,
         suggest_price: detail.suggest_price,
+        purchase_price: (detail as { purchase_price?: number | null }).purchase_price ?? null,
+        internal_price: (detail as { internal_price?: number | null }).internal_price ?? null,
         unit: detail.unit,
         need_label: detail.need_label,
         print_mode: detail.print_mode,
@@ -146,6 +148,8 @@ export default function ItemDetail() {
       barcode: values.barcode ? String(values.barcode).trim() : null,
       spec: values.spec ?? '',
       suggest_price: values.suggest_price ?? null,
+      purchase_price: values.purchase_price ?? null,
+      internal_price: values.internal_price ?? null,
       unit: values.unit ?? '件',
       need_label: !!values.need_label,
       print_mode: values.print_mode ?? 'label',
@@ -279,7 +283,13 @@ export default function ItemDetail() {
                   </Form.Item>
                 </Col>
                 <Col xs={12} sm={6}>
-                  <Form.Item name="suggest_price" label="建议售价（元）">
+                  <Form.Item name="suggest_price" label="建议售价（元）" tooltip="各校区卖给用户的价格">
+                    <InputNumber style={{ width: '100%' }} min={0} step={0.1} precision={2} placeholder="0.00" />
+                  </Form.Item>
+                  <Form.Item name="purchase_price" label="采购价（元）" tooltip="总校办采购这批物品的实际成本（仅管理员可见）">
+                    <InputNumber style={{ width: '100%' }} min={0} step={0.1} precision={2} placeholder="0.00" />
+                  </Form.Item>
+                  <Form.Item name="internal_price" label="内部销售价（元）" tooltip="总校办出库到校区的价格（仅管理员可见）">
                     <InputNumber style={{ width: '100%' }} min={0} step={0.1} precision={2} placeholder="0.00" />
                   </Form.Item>
                 </Col>

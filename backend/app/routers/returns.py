@@ -26,7 +26,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.deps import get_current_user, require_role
+from app.deps import get_current_user, require_role, teacher_home_location
 from app.models import Item, Location, ReturnItem, ReturnOrder, User
 from app.schemas.common import BizError, not_found, ok, ok_page
 from app.services import stock
@@ -149,6 +149,21 @@ def _check_editable(o: ReturnOrder, user: User) -> None:
         raise BizError("只能修改自己创建的草稿单", code="ERR_FORBIDDEN", status=403)
 
 
+def _check_teacher_scope(o: ReturnOrder, user: User) -> None:
+    """教师只能查看/操作自己校区发起的退库单。"""
+    if user.role == "teacher" and o.from_location_id != teacher_home_location(user):
+        raise BizError("只能查看本校区的单据", code="ERR_FORBIDDEN", status=403)
+
+
+def _hq_warehouse_id(db) -> int:
+    """总校办仓库（type='warehouse' 的第一个启用库位）。"""
+    hq = db.scalar(select(Location).where(
+        Location.type == "warehouse", Location.is_active.is_(True)).order_by(Location.id))
+    if hq is None:
+        raise BizError("系统中没有可用的总校办仓库库位，请联系管理员", code="ERR_NO_HQ", status=500)
+    return hq.id
+
+
 # ---------- 路由 ----------
 
 @router.get("")
@@ -160,11 +175,14 @@ def list_return_orders(
     start: date | None = None, end: date | None = None,
     q: str | None = None,
     sort_by: str = "id", sort_dir: str = "desc",
-    _: User = Depends(get_current_user), db: Session = Depends(get_db),
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     page = max(1, page)
     page_size = min(200, max(1, page_size))
     conds = []
+    # 教师：只能看自己校区的退库单
+    if user.role == "teacher":
+        location_id = teacher_home_location(user)
     if state:
         conds.append(ReturnOrder.state == state)
     if item_condition:
@@ -203,6 +221,10 @@ def list_return_orders(
 @router.post("")
 def create_return_order(body: ReturnCreate, request: Request,
                         user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 教师：从本校区退回总校办仓库（收发库位均固定，不可选）
+    if user.role == "teacher":
+        body.from_location_id = teacher_home_location(user)
+        body.to_location_id = _hq_warehouse_id(db)
     _validate_locations(db, body.from_location_id, body.to_location_id)
     doc_no = next_doc_no(db, PREFIX_RETURN)
     o = ReturnOrder(
@@ -230,19 +252,25 @@ def create_return_order(body: ReturnCreate, request: Request,
 
 
 @router.get("/{order_id}")
-def get_return_order(order_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return ok(order_detail(_get_order(db, order_id)))
+def get_return_order(order_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    o = _get_order(db, order_id)
+    _check_teacher_scope(o, user)
+    return ok(order_detail(o))
 
 
 @router.patch("/{order_id}")
 def patch_return_order(order_id: int, body: ReturnPatch, request: Request,
                        user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     o = _get_order(db, order_id)
+    _check_teacher_scope(o, user)
     _check_editable(o, user)
     data = body.model_dump(exclude_unset=True)
 
     new_from = data.get("from_location_id", o.from_location_id) or o.from_location_id
     new_to = data.get("to_location_id", o.to_location_id) or o.to_location_id
+    if user.role == "teacher":
+        # 教师单据的收发库位不允许变更
+        new_from, new_to = o.from_location_id, o.to_location_id
     if "from_location_id" in data or "to_location_id" in data:
         _validate_locations(db, new_from, new_to)
     o.from_location_id = new_from

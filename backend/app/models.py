@@ -55,7 +55,7 @@ def _pk() -> Mapped[int]:
 
 
 # ---------- 枚举（PG 原生 TYPE / SQLite VARCHAR+CHECK） ----------
-UserRoleEnum = Enum("admin", "superadmin", "operator", name="user_role", create_constraint=True)
+UserRoleEnum = Enum("admin", "superadmin", "operator", "teacher", name="user_role", create_constraint=True)
 ItemStatusEnum = Enum("active", "merged", "retired", name="item_status", create_constraint=True)
 PrintModeEnum = Enum("label", "scan_card", name="print_mode", create_constraint=True)
 DocTypeEnum = Enum(
@@ -187,6 +187,8 @@ class Item(Base):
     category_id: Mapped[int] = mapped_column(BigIntPK, ForeignKey("categories.id"), nullable=False)
     spec: Mapped[str | None] = mapped_column(String(100), default="", server_default=text("''"))
     suggest_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    purchase_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)  # 真实采购价（仅管理员可见）
+    internal_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)  # 内部销售价：总校办→校区（仅管理员可见）
     unit: Mapped[str | None] = mapped_column(String(20), default="件", server_default=text("'件'"))
     need_label: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     print_mode: Mapped[str] = mapped_column(PrintModeEnum, nullable=False, default="label", server_default=text("'label'"))

@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import can_see_cost_prices, get_current_user, teacher_home_location
 from app.models import BarcodeHistory, Inventory, Item, User
 from app.schemas.common import ok
 from app.services import barcode as bc
@@ -24,10 +24,13 @@ router = APIRouter(prefix="/scan", tags=["扫码"])
 
 
 @router.get("/resolve")
-def resolve(code: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def resolve(code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     code = (code or "").strip()
     rule = bc.get_rule(db)
     code_type = "internal" if bc.is_internal_code(code, rule) else "external"
+
+    # 教师：只展示自己校区的库存（price 字段对教师脱敏在下方处理）
+    own_location_id = teacher_home_location(user) if user.role == "teacher" else None
 
     base = {
         "resolved": False,
@@ -45,23 +48,30 @@ def resolve(code: str, _: User = Depends(get_current_user), db: Session = Depend
         .where(Item.barcode == code)
     )
     if item is not None and item.status == "active":
+        inv_conds = [Inventory.item_id == item.id]
+        if own_location_id is not None:
+            inv_conds.append(Inventory.location_id == own_location_id)
         invs = db.scalars(
-            select(Inventory).where(Inventory.item_id == item.id)
+            select(Inventory).where(*inv_conds)
             .order_by(Inventory.location_id)
         ).all()
         photos = item.photos or []
         primary = next((p for p in photos if p.is_primary), photos[0] if photos else None)
+        item_d = {
+            "id": item.id, "barcode": item.barcode, "name": item.name,
+            "category": item.category.name if item.category else None,
+            "spec": item.spec or "",
+            "suggest_price": float(item.suggest_price) if item.suggest_price is not None else None,
+            "need_label": item.need_label,
+            "photo_url": f"/api/uploads/{primary.file_path}" if primary else None,
+        }
+        if can_see_cost_prices(user):
+            item_d["purchase_price"] = float(item.purchase_price) if item.purchase_price is not None else None
+            item_d["internal_price"] = float(item.internal_price) if item.internal_price is not None else None
         return ok({
             **base,
             "resolved": True,
-            "item": {
-                "id": item.id, "barcode": item.barcode, "name": item.name,
-                "category": item.category.name if item.category else None,
-                "spec": item.spec or "",
-                "suggest_price": float(item.suggest_price) if item.suggest_price is not None else None,
-                "need_label": item.need_label,
-                "photo_url": f"/api/uploads/{primary.file_path}" if primary else None,
-            },
+            "item": item_d,
             "inventory": [
                 {"location_id": inv.location_id,
                  "location_name": inv.location.name if inv.location else None,
