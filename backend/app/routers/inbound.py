@@ -248,7 +248,6 @@ def create_inbound_order(body: InboundCreate, request: Request,
     return ok(order_detail(_get_order(db, o.id), user=user))
 
 
-@router.get("/{order_id}")
 def _check_teacher_scope(o: InboundOrder, user: User) -> None:
     """教师只能查看/操作自己校区的入库单。"""
     if user.role == "teacher" and o.location_id != teacher_home_location(user):
