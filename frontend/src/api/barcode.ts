@@ -23,9 +23,9 @@ export function previewBarcode(category_id: number) {
   });
 }
 
-/** 分配条码：给单个物品，或按类目批量分配 count 个 */
+/** 分配条码：给单个物品，或按类目批量分配 count 个；item_ids=待编码页批量绑定 */
 export function allocateBarcode(payload: { item_ids?: number[]; item_id?: number; category_id?: number; count?: number }) {
-  return request<{ allocated: { item_id: number; barcode: string }[] }>({
+  return request<{ allocated: { item_id: number; barcode: string }[]; skipped?: { item_id: number; name?: string; reason: string }[] }>({
     method: 'POST',
     url: '/barcode/allocate',
     data: payload,

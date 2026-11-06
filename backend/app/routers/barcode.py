@@ -136,18 +136,55 @@ def preview(body: PreviewBody, _: User = Depends(get_current_user), db: Session 
 
 class AllocateBody(BaseModel):
     item_id: int | None = None
+    item_ids: list[int] | None = None
     category_id: int | None = None
     count: int = Field(default=1, ge=1, le=500)
 
 
 @router.post("/barcode/allocate")
 def allocate(body: AllocateBody, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """两种模式：
+    """三种模式：
+    - item_ids：批量给待编码物品分配并绑定（待编码物品页），返回 allocated 列表；
+      默认按各物品自身类目编码，可用 category_id 强制统一类目
     - item_id：给单个待编码物品分配并绑定（写 barcode_history type=assign）
     - category_id + count：只分配 n 个连续码返回（不绑定物品，用于批量打印等）
     """
-    if body.item_id is None and body.category_id is None:
-        raise BizError("必须提供 item_id 或 category_id", code="ERR_BAD_REQUEST")
+    if body.item_id is None and body.category_id is None and not body.item_ids:
+        raise BizError("必须提供 item_id、item_ids 或 category_id", code="ERR_BAD_REQUEST")
+
+    if body.item_ids:
+        if len(body.item_ids) > 500:
+            raise BizError("单次最多分配 500 个物品", code="ERR_BAD_REQUEST")
+        allocated: list[dict] = []
+        skipped: list[dict] = []
+        for iid in body.item_ids:
+            item = db.get(Item, iid)
+            if item is None:
+                skipped.append({"item_id": iid, "reason": "物品不存在"})
+                continue
+            if item.status != "active":
+                skipped.append({"item_id": iid, "name": item.name, "reason": "档案已删除/停用"})
+                continue
+            if item.barcode:
+                skipped.append({"item_id": iid, "name": item.name, "reason": f"已有条码 {item.barcode}"})
+                continue
+            cat_id = body.category_id or item.category_id
+            code = _allocate_with_retry(db, cat_id, 1)[0]
+            item.barcode = code
+            item.barcode_origin = "internal"
+            item.category_id = cat_id
+            db.add(BarcodeHistory(
+                item_id=item.id, old_barcode=None, new_barcode=code,
+                change_type="assign", reason="批量分配条码", operator_id=user.id,
+            ))
+            write_audit(db, action="assign_barcode", entity="item", entity_id=item.id, user=user,
+                        detail={"barcode": code, "batch": True}, request=request)
+            allocated.append({"item_id": item.id, "barcode": code})
+        if not allocated:
+            raise BizError("所选物品均无法分配条码：" + "；".join(s["reason"] for s in skipped[:3]),
+                           code="ERR_NOT_ALLOCATABLE", status=409)
+        db.commit()
+        return ok({"allocated": allocated, "skipped": skipped})
 
     if body.item_id is not None:
         item = db.get(Item, body.item_id)

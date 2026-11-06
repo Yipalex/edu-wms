@@ -66,6 +66,13 @@ export default function PendingCode() {
       setAllocatedCodes(res.allocated);
       queryClient.invalidateQueries({ queryKey: ['items'] });
       message.success(`已为 ${res.allocated.length} 个物品分配条码`);
+      if (res.skipped?.length) {
+        message.warning(
+          `跳过 ${res.skipped.length} 个：${res.skipped
+            .map((s) => `${s.name ?? `物品#${s.item_id}`}（${s.reason}）`)
+            .join('；')}`,
+        );
+      }
     } catch {
       // 拦截器已提示
     } finally {
