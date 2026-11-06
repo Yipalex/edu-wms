@@ -531,6 +531,27 @@ class ItemMergeLog(Base):
     operator: Mapped["User | None"] = relationship("User", lazy="joined")
 
 
+class DuplicateGroupIgnore(Base):
+    """去重合并：人工判定「看似重复、实则不是」的分组，按成员集合(group_key)忽略。
+
+    group_key = 成员 item id 升序连字符（与 /items/duplicates 返回的 group_key 一致）。
+    成员集合变化会生成新 group_key，分组会重新出现供再次人工判断。
+    members 快照存 [{id, name, barcode}]，物品后续被合并/删除也能展示。
+    """
+    __tablename__ = "duplicate_group_ignores"
+
+    id: Mapped[int] = _pk()
+    group_key: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    match_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    suggested_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    members: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(300), default="", server_default=text("''"))
+    operator_id: Mapped[int | None] = mapped_column(BigIntPK, ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"), default=utcnow)
+
+    operator: Mapped["User | None"] = relationship("User", lazy="joined")
+
+
 class DeletedItem(Base):
     """已彻底删除的物品档案（归档，2026-11-04 引入）。
 

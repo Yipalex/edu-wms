@@ -584,6 +584,18 @@ export interface MergeResult {
   message: string;
 }
 
+/** 已忽略的相似分组（人工判定不是重复） */
+export interface DuplicateIgnoreEntry {
+  id: number;
+  group_key: string;
+  match_type: DuplicateMatchType | null;
+  suggested_name: string | null;
+  members: { id: number; name: string; barcode: string | null }[];
+  reason: string;
+  operator_name?: string | null;
+  created_at: string | null;
+}
+
 export interface ItemMergeLogEntry {
   id: number;
   keeper_id: number;

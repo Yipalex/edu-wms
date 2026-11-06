@@ -265,7 +265,10 @@ def _merge_one(db: Session, keeper: Item, merged: Item, reason: str,
     db.execute(delete(Inventory).where(Inventory.item_id == merged.id))
 
     # ④ 四类单据明细行 item_id 改指 keeper（快照字段写 merged 的码/名，历史不失真）
-    for model in (InboundItem, OutboundItem, ReturnItem, StocktakeItem):
+    # ④ 单据明细行 item_id 改指 keeper（快照字段写 merged 的码/名，历史不失真）。
+    #    盘点行有 (stocktake_id, item_id) 唯一约束：同一盘点单两边都有行时，
+    #    账面数/实盘数并入 keeper 行后删除 merged 行，而不是直接改 item_id。
+    for model in (InboundItem, OutboundItem, ReturnItem):
         db.execute(
             update(model)
             .where(model.item_id == merged.id)
@@ -273,6 +276,27 @@ def _merge_one(db: Session, keeper: Item, merged: Item, reason: str,
                     barcode_snapshot=merged.barcode,
                     name_snapshot=merged.name)
         )
+    for m_row in db.scalars(
+        select(StocktakeItem).where(StocktakeItem.item_id == merged.id)
+    ).all():
+        k_row = db.scalar(
+            select(StocktakeItem).where(
+                StocktakeItem.stocktake_id == m_row.stocktake_id,
+                StocktakeItem.item_id == keeper.id,
+            )
+        )
+        if k_row is None:
+            m_row.item_id = keeper.id
+            m_row.barcode_snapshot = merged.barcode
+            m_row.name_snapshot = merged.name
+            continue
+        k_row.qty_book = (k_row.qty_book or 0) + (m_row.qty_book or 0)
+        if m_row.qty_counted is not None:
+            k_row.qty_counted = (k_row.qty_counted or 0) + m_row.qty_counted
+        if k_row.qty_counted is not None:
+            v = k_row.qty_counted - (k_row.qty_book or 0)
+            k_row.diff_state = '相符' if v == 0 else ('盘盈' if v > 0 else '盘亏')
+        db.delete(m_row)
 
     # ⑤ stock_movements.item_id 改指 keeper（保留原 doc_no）
     db.execute(

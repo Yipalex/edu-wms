@@ -2,6 +2,7 @@ import { request, requestPaged } from './client';
 import type {
   DeletedItemArchive,
   DuplicateGroup,
+  DuplicateIgnoreEntry,
   Item,
   ItemCreatePayload,
   ItemDetail,
@@ -102,12 +103,40 @@ export function setPrimaryPhoto(id: number, photoId: number) {
 
 // ========== 去重合并（契约第 5 节，仅 admin） ==========
 
-/** 相似分组（默认展示全部待人工复核，按置信度降序） */
+/** 相似分组（默认展示全部待人工复核，按置信度降序；已忽略组不出现） */
 export function getDuplicateGroups(threshold = 0.7) {
   return request<DuplicateGroup[]>({
     method: 'GET',
     url: '/items/duplicates',
     params: { threshold },
+  });
+}
+
+/** 忽略一个相似分组：人工判定不是重复，后续检测不再出现（幂等） */
+export function ignoreDuplicateGroup(payload: {
+  group_key: string;
+  match_type?: string;
+  suggested_name?: string;
+  members?: { id: number; name: string; barcode: string | null }[];
+  reason?: string;
+}) {
+  return request<{ id: number; group_key: string; message: string }>({
+    method: 'POST',
+    url: '/items/duplicates/ignore',
+    data: payload,
+  });
+}
+
+/** 已忽略的相似分组列表 */
+export function listDuplicateIgnores() {
+  return request<DuplicateIgnoreEntry[]>({ method: 'GET', url: '/items/duplicates/ignores' });
+}
+
+/** 恢复（取消忽略）：该分组重新出现在检测结果中 */
+export function restoreDuplicateIgnore(ignoreId: number) {
+  return request<{ message: string }>({
+    method: 'DELETE',
+    url: `/items/duplicates/ignores/${ignoreId}`,
   });
 }
 

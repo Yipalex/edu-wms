@@ -24,7 +24,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as itemsApi from '@/api/items';
-import type { DuplicateGroup, DuplicateMatchType, DuplicateMember, ItemMergeLogEntry } from '@/api/types';
+import type { DuplicateGroup, DuplicateIgnoreEntry, DuplicateMatchType, DuplicateMember, ItemMergeLogEntry } from '@/api/types';
 import PageContainer from '@/components/PageContainer';
 import { usePagination } from '@/hooks/usePagination';
 import { fmtDateTime, fmtMoney, fmtQty } from '@/utils/format';
@@ -88,6 +88,21 @@ function GroupCard({ group }: { group: DuplicateGroup }) {
       setReason('');
       queryClient.invalidateQueries({ queryKey: ['duplicate-groups'] });
       queryClient.invalidateQueries({ queryKey: ['merge-logs'] });
+    },
+  });
+
+  const ignoreMutation = useMutation({
+    mutationFn: () =>
+      itemsApi.ignoreDuplicateGroup({
+        group_key: group.group_key,
+        match_type: group.match_type,
+        suggested_name: group.suggested_name,
+        members: group.members.map((m) => ({ id: m.id, name: m.name, barcode: m.barcode })),
+      }),
+    onSuccess: (r) => {
+      message.success(r.message || '已忽略该分组');
+      queryClient.invalidateQueries({ queryKey: ['duplicate-groups'] });
+      queryClient.invalidateQueries({ queryKey: ['duplicate-ignores'] });
     },
   });
 
@@ -169,9 +184,20 @@ function GroupCard({ group }: { group: DuplicateGroup }) {
         )}
       />
       <div style={{ textAlign: 'right', marginTop: 8 }}>
-        <Button type="primary" disabled={!canMerge} onClick={() => setModalOpen(true)}>
-          预览并合并
-        </Button>
+        <Space>
+          <Popconfirm
+            title="判定这组不是重复？"
+            description="忽略后该分组不再出现在检测结果中，可在「已忽略」页恢复"
+            okText="忽略"
+            cancelText="取消"
+            onConfirm={() => ignoreMutation.mutate()}
+          >
+            <Button loading={ignoreMutation.isPending}>不是重复，忽略</Button>
+          </Popconfirm>
+          <Button type="primary" disabled={!canMerge} onClick={() => setModalOpen(true)}>
+            预览并合并
+          </Button>
+        </Space>
       </div>
       <Modal
         title="确认合并"
@@ -340,6 +366,77 @@ function MergeLogs() {
   );
 }
 
+// ========== 已忽略分组 ==========
+
+function IgnoredGroups() {
+  const queryClient = useQueryClient();
+  const { data, isFetching } = useQuery({
+    queryKey: ['duplicate-ignores'],
+    queryFn: () => itemsApi.listDuplicateIgnores(),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (id: number) => itemsApi.restoreDuplicateIgnore(id),
+    onSuccess: (r) => {
+      message.success(r.message || '已恢复');
+      queryClient.invalidateQueries({ queryKey: ['duplicate-ignores'] });
+      queryClient.invalidateQueries({ queryKey: ['duplicate-groups'] });
+    },
+  });
+
+  const columns: ColumnsType<DuplicateIgnoreEntry> = [
+    { title: '时间', dataIndex: 'created_at', width: 150, render: (v: string | null) => (v ? fmtDateTime(v) : '—') },
+    {
+      title: '组内物品',
+      key: 'members',
+      render: (_, r) =>
+        (r.members || []).map((m) => `${m.name}（${m.barcode ?? '无码'}）`).join('、') || '—',
+    },
+    {
+      title: '类型',
+      dataIndex: 'match_type',
+      width: 110,
+      render: (v: DuplicateMatchType | null) =>
+        v ? <Tag color={MATCH_TYPE_META[v]?.color}>{MATCH_TYPE_META[v]?.label}</Tag> : '—',
+    },
+    { title: '说明', dataIndex: 'reason', ellipsis: true, render: (v: string) => v || '—' },
+    { title: '操作人', dataIndex: 'operator_name', width: 100, render: (v: string | null) => v ?? '—' },
+    {
+      title: '操作',
+      key: 'action',
+      width: 90,
+      render: (_, r) => (
+        <Popconfirm
+          title="恢复该分组？"
+          description="恢复后将重新出现在相似分组检测结果中"
+          okText="恢复"
+          cancelText="取消"
+          onConfirm={() => restoreMutation.mutate(r.id)}
+        >
+          <Button type="link" size="small">
+            恢复
+          </Button>
+        </Popconfirm>
+      ),
+    },
+  ];
+
+  return (
+    <Card size="small" styles={{ body: { padding: 0 } }}>
+      <Table<DuplicateIgnoreEntry>
+        rowKey="id"
+        columns={columns}
+        dataSource={data ?? []}
+        loading={isFetching || restoreMutation.isPending}
+        size="middle"
+        pagination={false}
+        locale={{ emptyText: <Empty description="没有已忽略的分组" /> }}
+        scroll={{ x: 900 }}
+      />
+    </Card>
+  );
+}
+
 /** 去重合并（仅管理员）：相似物品分组复核、合并与回滚 */
 export default function Duplicates() {
   return (
@@ -348,12 +445,13 @@ export default function Duplicates() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="系统自动检测相似物品。合并后：库存并入保留项、历史单据改指保留项、被合并条码停用且不再复用、原名称进别名可搜索。操作可回滚。"
+        message="系统自动检测相似物品。判定不是重复的组可点「忽略」不再显示（「已忽略」页可恢复）；合并后：库存并入保留项、历史单据改指保留项、被合并条码停用且不再复用、原名称进别名可搜索。操作可回滚。"
       />
       <Tabs
         items={[
           { key: 'groups', label: '相似分组', children: <DuplicateGroups /> },
           { key: 'logs', label: '合并记录', children: <MergeLogs /> },
+          { key: 'ignored', label: '已忽略', children: <IgnoredGroups /> },
         ]}
       />
     </PageContainer>

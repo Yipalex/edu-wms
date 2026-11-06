@@ -28,8 +28,8 @@ from app.config import settings
 from app.db import get_db
 from app.deps import can_see_cost_prices, deny_teacher, get_current_user, require_role, require_super_admin
 from app.models import (
-    BarcodeHistory, Category, DeletedItem, Inventory, Item, ItemAlias, ItemMergeLog, ItemPhoto,
-    StockMovement, User,
+    BarcodeHistory, Category, DeletedItem, DuplicateGroupIgnore, Inventory, Item, ItemAlias,
+    ItemMergeLog, ItemPhoto, StockMovement, User,
 )
 from app.schemas.common import BizError, ok, ok_page
 from app.services import barcode as bc
@@ -266,8 +266,12 @@ def list_duplicates(
     groups = merge_svc.find_duplicate_groups(
         [{"id": i.id, "name": i.name} for i in items], threshold=threshold,
     )
+    # 人工判定「不是重复」的组不再出现（按成员集合 group_key 忽略）
+    ignored_keys = set(db.scalars(select(DuplicateGroupIgnore.group_key)).all())
     out = []
     for g in groups:
+        if g["group_key"] in ignored_keys:
+            continue
         out.append({
             "group_key": g["group_key"],
             "match_type": g["match_type"],
@@ -276,6 +280,79 @@ def list_duplicates(
             "members": [member_map[mid] for mid in g["member_ids"]],
         })
     return ok(out)
+
+
+class IgnoreBody(BaseModel):
+    group_key: str
+    match_type: str | None = None
+    suggested_name: str | None = None
+    members: list[dict] = []
+    reason: str = Field(default="", max_length=300)
+
+
+@router.post("/duplicates/ignore")
+def ignore_duplicate_group(
+    body: IgnoreBody, request: Request,
+    admin: User = Depends(AdminUser), db: Session = Depends(get_db),
+):
+    """忽略一个相似分组：人工判定不是重复，后续检测不再出现。幂等（重复忽略返回已有记录）。"""
+    if not re.fullmatch(r"\d+(-\d+)+", body.group_key or ""):
+        raise BizError("group_key 格式不合法", code="ERR_BAD_REQUEST", status=400)
+    row = db.scalar(select(DuplicateGroupIgnore).where(DuplicateGroupIgnore.group_key == body.group_key))
+    if row is None:
+        row = DuplicateGroupIgnore(
+            group_key=body.group_key,
+            match_type=body.match_type,
+            suggested_name=(body.suggested_name or "")[:200] or None,
+            members=body.members or [],
+            reason=body.reason or "",
+            operator_id=admin.id,
+        )
+        db.add(row)
+        write_audit(db, action="ignore_duplicate_group", entity="item", entity_id=None, user=admin,
+                    detail={"group_key": body.group_key, "reason": body.reason,
+                            "suggested_name": body.suggested_name}, request=request)
+        db.commit()
+    return ok({"id": row.id, "group_key": row.group_key, "message": "已忽略该分组，后续检测不再显示"})
+
+
+@router.get("/duplicates/ignores")
+def list_duplicate_ignores(
+    admin: User = Depends(AdminUser), db: Session = Depends(get_db),
+):
+    """已忽略的相似分组列表（恢复入口）。"""
+    rows = db.scalars(
+        select(DuplicateGroupIgnore).order_by(DuplicateGroupIgnore.id.desc()).limit(500)
+    ).all()
+    return ok([
+        {
+            "id": r.id,
+            "group_key": r.group_key,
+            "match_type": r.match_type,
+            "suggested_name": r.suggested_name,
+            "members": r.members or [],
+            "reason": r.reason or "",
+            "operator_name": r.operator.display_name if r.operator else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ])
+
+
+@router.delete("/duplicates/ignores/{ignore_id}")
+def restore_duplicate_group(
+    ignore_id: int, request: Request,
+    admin: User = Depends(AdminUser), db: Session = Depends(get_db),
+):
+    """恢复（取消忽略）：删除记录，该分组重新出现在检测结果中。"""
+    row = db.get(DuplicateGroupIgnore, ignore_id)
+    if row is None:
+        raise BizError("忽略记录不存在", code="ERR_NOT_FOUND", status=404)
+    write_audit(db, action="restore_duplicate_group", entity="item", entity_id=None, user=admin,
+                detail={"group_key": row.group_key}, request=request)
+    db.delete(row)
+    db.commit()
+    return ok({"message": "已恢复，该分组将重新出现在检测结果中"})
 
 
 @router.get("/merges")
